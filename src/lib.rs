@@ -196,6 +196,29 @@ pub fn field_demo<F: Field>(x: F, y: F) -> F {
     x.mul(y).add(x)
 }
 
+/// A generic caller exercising [`ModArith::mont_mul`] **nominally**, so
+/// `haxpipeT` emits a call site for the Montgomery multiply. Not `#[cfg]`-gated:
+/// the extraction must see it. The body is a single trait-op call, so the op
+/// identity is declared by the method name and the realization stays the opaque
+/// arithmetic leaf.
+pub fn modarith_demo<F: ModArith>(a: F, b: F) -> F {
+    a.mont_mul(b)
+}
+
+/// A generic caller exercising [`EcGroup::point_add`] **nominally**, so
+/// `haxpipeT` emits a call site for the group add. Not `#[cfg]`-gated: the
+/// extraction must see it. The body is a single trait-op call, so the op
+/// identity is declared by the method name and the realization stays the opaque
+/// arithmetic leaf.
+pub fn ec_demo<G: EcGroup>(p: G, q: G) -> G {
+    p.point_add(q)
+}
+
+/// A generic caller exercising [`EcGroup::point_double`] **nominally**.
+pub fn ec_double_demo<G: EcGroup>(p: G) -> G {
+    p.point_double()
+}
+
 // The concrete reference instance — the OPAQUE ARITHMETIC LEAF. It is gated out
 // of the hax extraction (`cfg(not(hax))`): hax recognizes the trait surface
 // above nominally and treats the realization as opaque, so the leaf body need
