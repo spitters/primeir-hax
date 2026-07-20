@@ -1,0 +1,16 @@
+[package]
+name = "primeir-hax"
+version = "0.1.0"
+edition = "2021"
+description = "Prime-IR trait surface at the hax level — nominal Field/ModArith/EcGroup ops that map to the VIR prime-IR dialect (FieldOp/ModArithMont/ECOp); dual-use rustc + hax"
+license = "MIT"
+
+[dependencies]
+# The reference instance (opaque arithmetic leaf) is realized with num-bigint.
+# It is gated out of the hax extraction (`#[cfg(not(hax))]`), so the trait
+# surface extracts even though this dependency is not in hax's input subset.
+num-bigint = "0.4"
+
+[lints.rust]
+# hax passes `--cfg hax`; keep rustc from warning on the gate.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(hax)'] }
