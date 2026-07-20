@@ -185,6 +185,17 @@ impl Scalar {
     }
 }
 
+/// A tiny generic caller that exercises the [`Field`] trait methods
+/// **nominally**, so `cargo hax into lean` emits a call site for `Field::mul`
+/// and `Field::add`. It is deliberately *not* `#[cfg]`-gated: the extraction
+/// must see it. Computes `x·y + x`, so both the canonical `mul` target and an
+/// `add` appear at recognizable trait-method call sites. The body is a pure
+/// composition of trait ops — the identity of each op is declared by the
+/// method name, the realization stays the opaque arithmetic leaf.
+pub fn field_demo<F: Field>(x: F, y: F) -> F {
+    x.mul(y).add(x)
+}
+
 // The concrete reference instance — the OPAQUE ARITHMETIC LEAF. It is gated out
 // of the hax extraction (`cfg(not(hax))`): hax recognizes the trait surface
 // above nominally and treats the realization as opaque, so the leaf body need
