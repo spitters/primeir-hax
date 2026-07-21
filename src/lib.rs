@@ -219,6 +219,18 @@ pub fn ec_double_demo<G: EcGroup>(p: G) -> G {
     p.point_double()
 }
 
+/// A generic caller exercising [`EcGroup::scalar_mul`] **nominally**, carrying a
+/// **secret** [`Scalar`] `k` from the source signature through to the call site.
+/// Not `#[cfg]`-gated: the extraction must see it. This is the CT axis end-to-end
+/// witness — the `Scalar` parameter `k` is recognized nominally and lands in the
+/// emitted `_secrecy` side table, so `cmdCT` fail-closes on any data-dependent use
+/// of the scalar. The body is a single trait-op call; the ladder identity is
+/// declared by the method name and the realization stays the opaque arithmetic
+/// leaf.
+pub fn scalar_mul_demo<G: EcGroup>(p: G, k: Scalar) -> G {
+    p.scalar_mul(k)
+}
+
 // The concrete reference instance — the OPAQUE ARITHMETIC LEAF. It is gated out
 // of the hax extraction (`cfg(not(hax))`): hax recognizes the trait surface
 // above nominally and treats the realization as opaque, so the leaf body need
