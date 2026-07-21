@@ -231,6 +231,25 @@ pub fn scalar_mul_demo<G: EcGroup>(p: G, k: Scalar) -> G {
     p.scalar_mul(k)
 }
 
+/// The field modulus of the `2^255-19` reference, as four little-endian `u64`
+/// limbs. A **hax-visible source constant**: `haxpipeT` emits the `pub const`
+/// (top-level consts are on the extraction surface), so the modulus is carried
+/// *from the source* rather than supplied only on the Lean side. The Lean
+/// recognizer reconstructs `∑ limbᵢ·2^(64·i)` and ties it to the `p` the field
+/// recognizers use, folding the modulus into the verified chain.
+pub const FIELD_MODULUS_25519: [u64; 4] = [
+    0xFFFF_FFFF_FFFF_FFED,
+    0xFFFF_FFFF_FFFF_FFFF,
+    0xFFFF_FFFF_FFFF_FFFF,
+    0x7FFF_FFFF_FFFF_FFFF,
+];
+
+/// Expose the modulus limbs, keeping [`FIELD_MODULUS_25519`] on the hax surface
+/// (an unreferenced `const` can be dropped before extraction).
+pub fn field_modulus_limbs() -> [u64; 4] {
+    FIELD_MODULUS_25519
+}
+
 // The concrete reference instance — the OPAQUE ARITHMETIC LEAF. It is gated out
 // of the hax extraction (`cfg(not(hax))`): hax recognizes the trait surface
 // above nominally and treats the realization as opaque, so the leaf body need
