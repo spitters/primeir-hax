@@ -46,9 +46,13 @@
 //! Four trait families: Field / ModArith / EC here, and the polynomial-ring
 //! family [`poly::PolyRing`] (`ntt`, `intt`, `basemul`, `poly_add`, `poly_sub`,
 //! `poly_smul`, `ntt_mul`), which names the operations of the `polyDialect`
-//! (`PolyOp`). Reference instances: `fp25519` for the first three and
-//! `mldsa_q` (the ML-DSA modulus `q = 8380417` and `Z_q[X]/(X^256 + 1)`) for
-//! `Field`, `ModArith` and `PolyRing`.
+//! (`PolyOp`); plus the constant-time family [`ct::CtField`] and the
+//! square-root-of-a-ratio op [`sqrt::SqrtRatio`] (RFC 9380, Appendix F.2.1).
+//! Reference instances: `fp25519` for `Field`, `ModArith`, `EcGroup`,
+//! `CtField` and `SqrtRatio`; `fp256` (the NIST P-256 prime) for `Field`,
+//! `ModArith`, `CtField` and `SqrtRatio`; and `mldsa_q` (the ML-DSA modulus
+//! `q = 8380417` and `Z_q[X]/(X^256 + 1)`) for `Field`, `ModArith` and
+//! `PolyRing`.
 
 #![forbid(unsafe_code)]
 // Stable Rust only: no intrinsics, no nightly features. `autoImplicit`-style
@@ -255,6 +259,24 @@ pub fn field_modulus_limbs() -> [u64; 4] {
     FIELD_MODULUS_25519
 }
 
+/// The field modulus of the NIST P-256 reference,
+/// `p = 2^256 - 2^224 + 2^192 + 2^96 - 1`
+/// `  = 0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff`,
+/// as four little-endian `u64` limbs. A hax-visible source constant in the
+/// sense of [`FIELD_MODULUS_25519`].
+pub const FIELD_MODULUS_P256: [u64; 4] = [
+    0xFFFF_FFFF_FFFF_FFFF,
+    0x0000_0000_FFFF_FFFF,
+    0x0000_0000_0000_0000,
+    0xFFFF_FFFF_0000_0001,
+];
+
+/// Expose the P-256 modulus limbs, keeping [`FIELD_MODULUS_P256`] on the hax
+/// surface.
+pub fn field_modulus_p256_limbs() -> [u64; 4] {
+    FIELD_MODULUS_P256
+}
+
 // The concrete reference instance — the OPAQUE ARITHMETIC LEAF. It is gated out
 // of the hax extraction (`cfg(not(hax))`): hax recognizes the trait surface
 // above nominally and treats the realization as opaque, so the leaf body need
@@ -263,9 +285,17 @@ pub fn field_modulus_limbs() -> [u64; 4] {
 #[cfg(not(hax))]
 pub mod fp25519;
 
+// The reference instance of the P-256 base field: an opaque arithmetic leaf,
+// gated out of the extraction like `fp25519`.
+#[cfg(not(hax))]
+pub mod fp256;
+
 // The polynomial-ring op family (`PolyOp`), on the extraction surface.
 pub mod poly;
 pub mod ct;
+// The square-root-of-a-ratio op (`SqrtRatio`, RFC 9380, Appendix F.2.1), on
+// the extraction surface; its reference instances are gated inside the module.
+pub mod sqrt;
 
 // Its reference instance at the ML-DSA modulus: an opaque arithmetic leaf,
 // gated out of the extraction like `fp25519`.
