@@ -10,5 +10,5 @@ notes = "kat.rs asserts (i) field identities (a*ONE=a, a*inv(a)=ONE, distributiv
 module = "ct"
 reference = "RFC 9496 Appendix A: the eight negative field elements of A.2 through CtField::is_negative and CtField::ct_abs here; all of A.1 to A.4 through the five CtField operations at Fp25519 in ../ristretto255-hax/tests/generic_vectors.rs"
 reference_kind = "standards-body-vectors"
-test_files = ["tests/ct_kat.rs"]
+test_files = ["tests/ct_properties.rs"]
 provenance = "https://www.rfc-editor.org/rfc/rfc9496.txt; the eight strings are the entries under Negative field elements in Appendix A.2"
