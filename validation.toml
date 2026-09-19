@@ -4,3 +4,11 @@ reference = "RFC 8032 edwards25519 published constants: base point B, curve para
 reference_kind = "rfc-vectors"
 test_files = ["tests/kat.rs", "tests/lattice_kat.rs"]
 notes = "kat.rs asserts (i) field identities (a*ONE=a, a*inv(a)=ONE, distributivity, (p-1)^2=1) cross-checked against num-bigint directly; (ii) the Montgomery contract from_mont(to_mont a)=a and mont_mul(to_mont a, to_mont b)=to_mont(a*b); (iii) the EC group law against RFC 8032 published values — [L]B = identity and [L+1]B = B, where L is the published edwards25519 subgroup order and B the published base point. lattice_kat.rs asserts for the mldsa_q instance (iv) the constants against FIPS 204 and the 255 entries of the zetas table of mldsa-hax; (v) the field operations and the Montgomery contract with R = 2^32 against mldsa-hax, including its signed Algorithm 49; (vi) ntt, intt, basemul and the coefficient-form operations against mldsa-hax (Algorithms 41, 42, 44, 45); (vii) the definition of the transform, ntt(w)[i] = w(zeta^(2*BitRev8(i)+1)), by Horner evaluation; (viii) ntt_mul against the schoolbook negacyclic product, and X^255 * X = -1; (ix) the generic callers mlwe_entry_demo and ntt_dot2_demo against the schoolbook product. The reference instances are the opaque arithmetic leaves; hax extracts only the trait surface."
+
+# Standards-body vectors for the constant-time op family (src/ct.rs).
+[[standards_vectors]]
+module = "ct"
+reference = "RFC 9496 Appendix A: the eight negative field elements of A.2 through CtField::is_negative and CtField::ct_abs here; all of A.1 to A.4 through the five CtField operations at Fp25519 in ../ristretto255-hax/tests/generic_vectors.rs"
+reference_kind = "standards-body-vectors"
+test_files = ["tests/ct_kat.rs"]
+provenance = "https://www.rfc-editor.org/rfc/rfc9496.txt; the eight strings are the entries under Negative field elements in Appendix A.2"

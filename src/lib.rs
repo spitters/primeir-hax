@@ -265,6 +265,7 @@ pub mod fp25519;
 
 // The polynomial-ring op family (`PolyOp`), on the extraction surface.
 pub mod poly;
+pub mod ct;
 
 // Its reference instance at the ML-DSA modulus: an opaque arithmetic leaf,
 // gated out of the extraction like `fp25519`.
