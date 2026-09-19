@@ -43,9 +43,12 @@
 //!
 //! ## Scope
 //!
-//! Three trait families cover Field / ModArith / EC. Polynomial-ring and NTT op
-//! families (`polynomial` dialect, `Poly`/`NTT`) are **TODO** — the natural next
-//! surface once these three are wired through `haxpipeT`.
+//! Four trait families: Field / ModArith / EC here, and the polynomial-ring
+//! family [`poly::PolyRing`] (`ntt`, `intt`, `basemul`, `poly_add`, `poly_sub`,
+//! `poly_smul`, `ntt_mul`), which names the operations of the `polyDialect`
+//! (`PolyOp`). Reference instances: `fp25519` for the first three and
+//! `mldsa_q` (the ML-DSA modulus `q = 8380417` and `Z_q[X]/(X^256 + 1)`) for
+//! `Field`, `ModArith` and `PolyRing`.
 
 #![forbid(unsafe_code)]
 // Stable Rust only: no intrinsics, no nightly features. `autoImplicit`-style
@@ -118,6 +121,8 @@ pub trait ModArith: Field {
     fn to_mont(self) -> Self;
     /// Map back from the Montgomery domain `a ↦ a·R⁻¹ mod p`.
     /// `ModArithMont.fromMont`.
+    // The name is the dialect operation `fromMont`, which takes its argument.
+    #[allow(clippy::wrong_self_convention)]
     fn from_mont(self) -> Self;
     /// Montgomery multiplication `(a, b) ↦ a·b·R⁻¹ mod p`.
     /// `ModArithMont.montMul`.
@@ -257,3 +262,11 @@ pub fn field_modulus_limbs() -> [u64; 4] {
 // `cargo build` / `cargo test` exercise real 255-bit arithmetic.
 #[cfg(not(hax))]
 pub mod fp25519;
+
+// The polynomial-ring op family (`PolyOp`), on the extraction surface.
+pub mod poly;
+
+// Its reference instance at the ML-DSA modulus: an opaque arithmetic leaf,
+// gated out of the extraction like `fp25519`.
+#[cfg(not(hax))]
+pub mod mldsa_q;

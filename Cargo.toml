@@ -11,6 +11,11 @@ license = "MIT"
 # surface extracts even though this dependency is not in hax's input subset.
 num-bigint = "0.4"
 
+[dev-dependencies]
+# The FIPS 204 specification crate (validated against NIST ACVP vectors); the
+# `mldsa_q` instance is compared with its NTT, field arithmetic and zeta table.
+mldsa-hax = { path = "../mldsa-hax" }
+
 [lints.rust]
 # hax passes `--cfg hax`; keep rustc from warning on the gate.
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(hax)'] }
