@@ -47,10 +47,22 @@
 //! `add`, `sub`, `neg`, `double`, `mul`, `square`, the conditional
 //! subtraction inside every one of them, and the whole of [`CtField`] are
 //! branch-free and index-free in the operand: selections are done with a
-//! `0`/`all-ones` mask. `pow` and `inv` branch on the bits of the exponent,
-//! which is a public constant at every call site in this crate (`p - 2` for
-//! `inv`, `(p - 3)/4` for `sqrt_ratio`); they are not constant time in a
-//! secret exponent.
+//! `0`/`all-ones` mask.
+//!
+//! [`Field::inv`] and [`SqrtRatio::sqrt_ratio`] reach their exponents through
+//! `pow_c1_limbs`, whose addition chain is a straight line of squarings and
+//! multiplications with no loop bound, branch or index that depends on the
+//! operand. Both exponents are constants of the chain rather than data, so
+//! there is no exponent to leak.
+//!
+//! [`Field::pow`] takes a runtime exponent and walks it in 4-bit windows. The
+//! window digits index a 16-entry table of powers of the base and decide
+//! whether a multiplication happens, so the memory trace and the operation
+//! count are a function of the exponent. The index is a window digit of the
+//! exponent, never of the base: `pow` is constant time in its base and not in
+//! its exponent. Every exponent passed to `pow` in this crate is a public
+//! constant, and the two exponents of the field's own callers (`p - 2` for
+//! `inv`, `(p - 3)/4` for `sqrt_ratio`) do not reach it at all.
 //!
 //! ## Rust subset
 //!
@@ -60,7 +72,7 @@
 //! and is written in the subset so that gate can be lifted.
 
 use crate::ct::CtField;
-use crate::sqrt::{SqrtRatio, SQRT_RATIO_3MOD4_C1_P256, SQRT_RATIO_3MOD4_C2_P256};
+use crate::sqrt::{SqrtRatio, SQRT_RATIO_3MOD4_C2_P256};
 use crate::{Field, ModArith};
 
 // --- Montgomery parameters ---------------------------------------------------
@@ -256,6 +268,57 @@ fn mont_mul_limbs(a: [u64; 4], b: [u64; 4]) -> [u64; 4] {
     reduce_once([t[4], t[5], t[6], t[7]], t[8])
 }
 
+// --- exponentiation -------------------------------------------------------------
+
+/// `a^(2^n)`: `n` Montgomery squarings.
+fn sqr_n(a: [u64; 4], n: usize) -> [u64; 4] {
+    let mut r = a;
+    let mut i = 0;
+    while i < n {
+        r = mont_mul_limbs(r, r);
+        i += 1;
+    }
+    r
+}
+
+/// `a^c1` for `c1 = (p - 3)/4` ([`crate::sqrt::SQRT_RATIO_3MOD4_C1_P256`]), by
+/// an addition chain of 253 squarings and 12 multiplications.
+///
+/// The chain follows the binary shape of `c1`, which is
+///
+/// ```text
+///   [32 ones] [31 zeros] 1 [96 zeros] [94 ones]
+/// ```
+///
+/// (254 bits). Writing `o(k)` for `a^(2^k - 1)`, five doubling steps
+/// `o(2k) = o(k)^(2^k) · o(k)` carry `o(1) = a` up to `o(32)`, the top
+/// segment. The accumulator then walks down the exponent, one shift-and-multiply
+/// per segment: `<< 32` and `· a` closes `[32 ones][31 zeros]1`, `<< 128` and
+/// `· o(32)` crosses the 96 zeros and lays the first 32 of the low ones, and
+/// `32 + 16 + 8 + 4 + 2` more ones complete the run of 94.
+///
+/// Every step is unconditional, so the operation sequence is the same for
+/// every `a`.
+fn pow_c1_limbs(a: [u64; 4]) -> [u64; 4] {
+    // Runs of ones: o(k) = a^(2^k - 1).
+    let o1 = a;
+    let o2 = mont_mul_limbs(sqr_n(o1, 1), o1);
+    let o4 = mont_mul_limbs(sqr_n(o2, 2), o2);
+    let o8 = mont_mul_limbs(sqr_n(o4, 4), o4);
+    let o16 = mont_mul_limbs(sqr_n(o8, 8), o8);
+    let o32 = mont_mul_limbs(sqr_n(o16, 16), o16);
+    // [32 ones][31 zeros]1
+    let acc = mont_mul_limbs(sqr_n(o32, 32), o1);
+    // [96 zeros] and the first 32 of the low ones.
+    let acc = mont_mul_limbs(sqr_n(acc, 128), o32);
+    // The remaining 32 + 16 + 8 + 4 + 2 = 62 low ones.
+    let acc = mont_mul_limbs(sqr_n(acc, 32), o32);
+    let acc = mont_mul_limbs(sqr_n(acc, 16), o16);
+    let acc = mont_mul_limbs(sqr_n(acc, 8), o8);
+    let acc = mont_mul_limbs(sqr_n(acc, 4), o4);
+    mont_mul_limbs(sqr_n(acc, 2), o2)
+}
+
 /// The little-endian byte encoding of four little-endian limbs.
 fn limbs_to_bytes_le(v: [u64; 4]) -> [u8; 32] {
     let mut out = [0u8; 32];
@@ -355,30 +418,62 @@ impl Field for Fp256Mont {
         Fp256Mont(add_mod(self.0, self.0))
     }
 
-    /// `self^(p-2)` by [`Field::pow`] over [`P_MINUS_TWO`] (Fermat). The
-    /// value at `ZERO` is `ZERO`, which the trait leaves unspecified.
+    /// `self^(p-2)` (Fermat), through the addition chain of `pow_c1_limbs`.
+    /// Since `4·c1 + 3 = p`, the Fermat exponent is `p - 2 = 4·c1 + 1`, which
+    /// is two further squarings and one multiplication past `c1`: 255
+    /// squarings and 13 multiplications in all, against the 256 squarings and
+    /// 128 multiplications of a bit-by-bit walk of [`P_MINUS_TWO`]. The value
+    /// at `ZERO` is `ZERO`, which the trait leaves unspecified.
     fn inv(self) -> Self {
-        self.pow(&P_MINUS_TWO)
+        let c1 = pow_c1_limbs(self.0);
+        Fp256Mont(mont_mul_limbs(sqr_n(c1, 2), self.0))
     }
 
-    /// Square-and-multiply over the bits of `exp`, most significant limb and
-    /// bit first. The branch is on the exponent, which is public.
+    /// `self^exp` for a runtime exponent, by a fixed 4-bit window: a table of
+    /// `self^0 … self^15`, then four squarings and at most one multiplication
+    /// per window, most significant limb and window first. A window is 4 bits
+    /// and a limb is 64, so no window straddles a limb boundary, and windows
+    /// above the leading non-zero one are skipped. A dense 256-bit exponent
+    /// costs 14 + 252 + 63 operations against the 256 + 256 of a bit-by-bit
+    /// walk.
+    ///
+    /// Which table entry is read and whether a multiplication happens are
+    /// functions of the exponent, which is public at every call site (see the
+    /// module documentation).
     fn pow(self, exp: &[u64]) -> Self {
-        let mut result = Self::ONE;
+        // table[d] = self^d.
+        let mut table = [[0u64; 4]; 16];
+        table[0] = Self::ONE.0;
+        table[1] = self.0;
+        let mut i = 2;
+        while i < 16 {
+            table[i] = mont_mul_limbs(table[i - 1], self.0);
+            i += 1;
+        }
+        let mut acc = Self::ONE.0;
+        // False until the leading non-zero window, so that a short exponent
+        // costs no squaring of `ONE`.
+        let mut started = false;
         let mut k = exp.len();
         while k > 0 {
             k -= 1;
             let limb = exp[k];
-            let mut i = 64usize;
-            while i > 0 {
-                i -= 1;
-                result = result.square();
-                if (limb >> i) & 1 == 1 {
-                    result = result.mul(self);
+            let mut s = 16usize;
+            while s > 0 {
+                s -= 1;
+                let d = ((limb >> (4 * s)) & 0xF) as usize;
+                if started {
+                    acc = sqr_n(acc, 4);
+                    if d != 0 {
+                        acc = mont_mul_limbs(acc, table[d]);
+                    }
+                } else if d != 0 {
+                    acc = table[d];
+                    started = true;
                 }
             }
         }
-        result
+        Fp256Mont(acc)
     }
 
     /// OS2IP mod `p` of a little-endian byte string of any length: Horner's
@@ -483,8 +578,8 @@ impl SqrtRatio for Fp256Mont {
         let tv2 = u.mul(v);
         // Step 3: tv1 = tv1 * tv2.
         let tv1 = tv1.mul(tv2);
-        // Step 4: y1 = tv1^c1.
-        let y1 = tv1.pow(&SQRT_RATIO_3MOD4_C1_P256);
+        // Step 4: y1 = tv1^c1, by the addition chain for c1 = (p - 3)/4.
+        let y1 = Fp256Mont(pow_c1_limbs(tv1.0));
         // Step 5: y1 = y1 * tv2.
         let y1 = y1.mul(tv2);
         // Step 6: y2 = y1 * c2.
@@ -506,6 +601,7 @@ impl SqrtRatio for Fp256Mont {
 mod tests {
     use super::*;
     use crate::fp256::Fp256;
+    use crate::sqrt::SQRT_RATIO_3MOD4_C1_P256;
 
     /// A deterministic SplitMix64 stream, so the randomized cases are the
     /// same on every run and the crate needs no `rand` dependency.
@@ -749,20 +845,85 @@ mod tests {
         }
     }
 
+    /// Exponents chosen for the 4-bit window of [`Field::pow`]: the empty and
+    /// zero exponents, exponents below one window, leading zero windows and
+    /// leading zero limbs, interior zero windows, all-ones windows, and the
+    /// two exponents of the field's own callers.
+    fn window_exponents() -> Vec<Vec<u64>> {
+        vec![
+            // Nothing to walk.
+            vec![],
+            vec![0],
+            vec![0, 0, 0, 0],
+            // Shorter than one window.
+            vec![1],
+            vec![2],
+            vec![15],
+            // One full window, then one past it.
+            vec![16],
+            vec![17],
+            // Fifteen leading zero windows inside a single limb.
+            vec![0x0000_0000_0000_000F],
+            vec![0x0000_0000_0000_00F0],
+            // Leading zero limbs above a set bit, and a single bit at the top.
+            vec![0xFFFF_FFFF_FFFF_FFFF, 0],
+            vec![1, 0, 0, 0],
+            vec![0, 0, 0, 1],
+            vec![0, 0, 0, 0x8000_0000_0000_0000],
+            // All-ones windows, one limb and four.
+            vec![0xFFFF_FFFF_FFFF_FFFF],
+            vec![
+                0xFFFF_FFFF_FFFF_FFFF,
+                0xFFFF_FFFF_FFFF_FFFF,
+                0xFFFF_FFFF_FFFF_FFFF,
+                0xFFFF_FFFF_FFFF_FFFF,
+            ],
+            // Interior zero windows, alternating and in runs.
+            vec![0x0F0F_0F0F_0F0F_0F0F],
+            vec![0xF0F0_0F0F_0000_F0F0, 0x0000_0000_FFFF_0000],
+            // The exponents of inv and sqrt_ratio.
+            SQRT_RATIO_3MOD4_C1_P256.to_vec(),
+            P_MINUS_TWO.to_vec(),
+        ]
+    }
+
     #[test]
     fn pow_agrees_with_the_bigint_instance() {
-        let exps: [&[u64]; 5] = [
-            &[],
-            &[0],
-            &[1],
-            &SQRT_RATIO_3MOD4_C1_P256,
-            &P_MINUS_TWO,
-        ];
         for b in sample_inputs(16) {
-            for e in exps {
-                agree("pow", fast(&b).pow(e), slow(&b).pow(e));
+            for e in window_exponents() {
+                agree("pow", fast(&b).pow(&e), slow(&b).pow(&e));
             }
         }
+    }
+
+    /// The addition chain of [`pow_c1_limbs`] and the generic window are two
+    /// implementations of the same two exponents; the window is checked
+    /// against `num-bigint` by `pow_agrees_with_the_bigint_instance`.
+    #[test]
+    fn the_addition_chain_agrees_with_the_generic_pow() {
+        for b in sample_inputs(128) {
+            let x = fast(&b);
+            assert_eq!(
+                Fp256Mont(pow_c1_limbs(x.0)),
+                x.pow(&SQRT_RATIO_3MOD4_C1_P256),
+                "chain at c1 = (p - 3)/4"
+            );
+            assert_eq!(x.inv(), x.pow(&P_MINUS_TWO), "chain at p - 2");
+        }
+    }
+
+    /// `4·c1 + 3 = p`, the relation that makes the Fermat exponent `p - 2`
+    /// two squarings and one multiplication past `c1`.
+    #[test]
+    fn four_c1_plus_three_is_the_modulus() {
+        let c1 = SQRT_RATIO_3MOD4_C1_P256;
+        let (two_c1, carry) = add_limbs(c1, c1);
+        assert_eq!(carry, 0);
+        let (four, carry) = add_limbs(two_c1, two_c1);
+        assert_eq!(carry, 0);
+        let (sum, carry) = add_limbs(four, [3, 0, 0, 0]);
+        assert_eq!(carry, 0);
+        assert_eq!(sum, P_LIMBS);
     }
 
     // --- byte strings longer and shorter than 32 bytes ------------------------
