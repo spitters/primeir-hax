@@ -78,7 +78,7 @@ pub fn ct_eq_up_to_sign_demo<F: CtField>(a: F, b: F) -> u64 {
 // representative that `Fp25519` stores, compares with `==` and selects with
 // `if`, so it is not constant-time. Gated out of the extraction with the
 // instance it extends.
-#[cfg(not(hax))]
+#[cfg(all(not(hax), feature = "bigint-instances"))]
 impl CtField for crate::fp25519::Fp25519 {
     fn ct_select(cond: u64, then_v: Self, else_v: Self) -> Self {
         if cond == 1 {

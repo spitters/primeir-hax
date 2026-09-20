@@ -53,8 +53,18 @@
 //! `ModArith`, `CtField` and `SqrtRatio`; and `mldsa_q` (the ML-DSA modulus
 //! `q = 8380417` and `Z_q[X]/(X^256 + 1)`) for `Field`, `ModArith` and
 //! `PolyRing`.
+//!
+//! ## Features
+//!
+//! `bigint-instances` (default) carries `fp25519` and `fp256`, which are
+//! realised with `num-bigint`. Without it the crate is the trait surface plus
+//! `mldsa_q`, is `no_std` and has no dependency; that is how a `no_std` crate
+//! such as `mldsa-hax` implements the traits for its own types.
 
 #![forbid(unsafe_code)]
+// Without the `bigint-instances` feature the crate is the trait surface plus
+// the `mldsa_q` instance, which use `core` only.
+#![cfg_attr(not(feature = "bigint-instances"), no_std)]
 // Stable Rust only: no intrinsics, no nightly features. `autoImplicit`-style
 // strictness is a Lean concern; here we just keep the surface plain.
 
@@ -282,12 +292,12 @@ pub fn field_modulus_p256_limbs() -> [u64; 4] {
 // above nominally and treats the realization as opaque, so the leaf body need
 // not live in hax's input subset. Under plain rustc the module is present, so
 // `cargo build` / `cargo test` exercise real 255-bit arithmetic.
-#[cfg(not(hax))]
+#[cfg(all(not(hax), feature = "bigint-instances"))]
 pub mod fp25519;
 
 // The reference instance of the P-256 base field: an opaque arithmetic leaf,
 // gated out of the extraction like `fp25519`.
-#[cfg(not(hax))]
+#[cfg(all(not(hax), feature = "bigint-instances"))]
 pub mod fp256;
 
 // The polynomial-ring op family (`PolyOp`), on the extraction surface.

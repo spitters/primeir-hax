@@ -23,6 +23,10 @@
 //! Truth values are `u64` values in `{0, 1}`, as in [`CtField`].
 
 use crate::ct::CtField;
+// The straight-line programs of the reference instances below call the
+// [`Field`] operations by name; `sqrt_ratio_demo` reaches them through the
+// supertrait.
+#[cfg(all(not(hax), feature = "bigint-instances"))]
 use crate::Field;
 
 /// A prime field with the `sqrt_ratio` subroutine of RFC 9380, Appendix F.2.1,
@@ -116,7 +120,7 @@ pub const SQRT_RATIO_3MOD4_C2_P256: [u8; 32] = [
 
 /// `sqrt_ratio_5mod8` (RFC 9380, Appendix F.2.1.3) at q = 2^255 - 19 with
 /// Z = 2, the Z of the curve25519 and edwards25519 suites (Section 8.5).
-#[cfg(not(hax))]
+#[cfg(all(not(hax), feature = "bigint-instances"))]
 impl SqrtRatio for crate::fp25519::Fp25519 {
     const Z: Self = crate::fp25519::Fp25519({
         let mut b = [0u8; 32];
@@ -174,7 +178,7 @@ impl SqrtRatio for crate::fp25519::Fp25519 {
 
 /// `sqrt_ratio_3mod4` (RFC 9380, Appendix F.2.1.2) at the P-256 prime with
 /// Z = -10, the Z of the P-256 suites (Section 8.2).
-#[cfg(not(hax))]
+#[cfg(all(not(hax), feature = "bigint-instances"))]
 impl SqrtRatio for crate::fp256::Fp256 {
     // Z = -10 = q - 10
     //   = 0xffffffff00000001000000000000000000000000fffffffffffffffffffffff5,

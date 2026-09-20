@@ -5,11 +5,19 @@ edition = "2021"
 description = "Prime-IR trait surface at the hax level — nominal Field/ModArith/EcGroup ops that map to the VIR prime-IR dialect (FieldOp/ModArithMont/ECOp); dual-use rustc + hax"
 license = "MIT"
 
+[features]
+default = ["bigint-instances"]
+# The `num-bigint`-backed reference instances (`fp25519`, `fp256`, and the
+# `CtField` / `SqrtRatio` impls over them). Without it the crate is the trait
+# surface plus the `mldsa_q` instance, is `no_std` and has no dependency, so a
+# `no_std` crate can implement the traits.
+bigint-instances = ["dep:num-bigint"]
+
 [dependencies]
 # The reference instance (opaque arithmetic leaf) is realized with num-bigint.
 # It is gated out of the hax extraction (`#[cfg(not(hax))]`), so the trait
 # surface extracts even though this dependency is not in hax's input subset.
-num-bigint = "0.4"
+num-bigint = { version = "0.4", optional = true }
 
 [dev-dependencies]
 # The FIPS 204 specification crate (validated against NIST ACVP vectors); the
