@@ -6,9 +6,9 @@
 //! limbs in the Montgomery domain: the limbs of `x : Fp256Mont` hold the
 //! integer `value(x) · R mod p` with `R = 2^256`. It carries the same trait
 //! surface as [`crate::fp256::Fp256`], realised without `num-bigint` and
-//! without a heap allocation on any path. The limb arithmetic is written to
-//! match the fiat-crypto `p256_64` output, and the crate's own differential
-//! tests check it against the `num-bigint` reference instance.
+//! without a heap allocation on any path. The crate's own differential tests
+//! check the limb arithmetic against the `num-bigint` reference instance,
+//! including at the representative edges that drive the carry paths.
 //!
 //! ## Representation
 //!
@@ -88,6 +88,10 @@ pub const P_LIMBS: [u64; 4] = [
 
 /// `-p^{-1} mod 2^64`. Because `p ≡ -1 (mod 2^64)`, this is `1`.
 pub const N0INV: u64 = 1;
+
+/// `q = 2^64 - 2^32 + 1`, the top limb of `p` and the only limb a reduction
+/// round multiplies by (see [`mont_reduce`]).
+const POLY3: u64 = 0xFFFF_FFFF_0000_0001;
 
 /// `R = 2^256 mod p = 2^224 - 2^192 - 2^96 + 1`, as four little-endian `u64`
 /// limbs. It is the Montgomery representation of the field element `1`.
@@ -211,26 +215,119 @@ fn sub_mod(a: [u64; 4], b: [u64; 4]) -> [u64; 4] {
     r
 }
 
-/// `a · b · R^{-1} mod p` for canonical `a`, `b`, by separated operand
-/// scanning: the full 512-bit product into `t[0..8]`, then four rounds of
-/// word-level Montgomery reduction, then one conditional subtraction.
+/// The shape of `p` that a Montgomery reduction round exploits.
 ///
-/// The accumulator is nine words. Step 1 leaves `t[8] = 0`; each reduction
-/// round clears one more low word and can carry at most into `t[8]`, since
-/// the running value stays below `2^576`. The value left in `t[4..9]` is
-/// `(a·b + m·p)/2^256 < 2p`, so `t[8]` is `0` or `1` and one subtraction of
-/// `p` suffices.
-fn mont_mul_limbs(a: [u64; 4], b: [u64; 4]) -> [u64; 4] {
-    let mut t = [0u64; 9];
-
-    // Step 1: the schoolbook product a·b into t[0..8].
+/// Round `i` adds `m · p · 2^{64i}` with `m = t[i]`, which clears word `i`.
+/// Writing `q = 2^64 - 2^32 + 1` ([`POLY3`]) for the top limb of `p`,
+///
+/// ```text
+///   m·p·2^{64i} = -m·2^{64i}
+///               + m·2^{64i+96} + m·2^{64i+192} - m·2^{64i+224} + m·2^{64i+256}
+/// ```
+///
+/// The first term cancels `t[i]` exactly, with no borrow. The second is
+/// `m·2^32` at words `i+1` and `i+2`, and the last three collect into
+/// `m·2^{64(i+3)}·(2^64 - 2^32 + 1) = m·q·2^{64(i+3)}`, two words at `i+3`
+/// and `i+4`. A round is therefore two shifts, one 64×64 product and four
+/// word additions, against the four products of a general modulus.
+///
+/// The carry out of word `i+4` is the only value that leaves a round, and
+/// word `i+5` is the highest word the next round touches, so it is held in
+/// `pend` and folded into that round rather than propagated to the top of
+/// the accumulator.
+///
+/// The argument must satisfy `t < p·2^256`, which holds for the product of
+/// two canonical operands. The value handed to [`reduce_once`] is then
+/// `(t + m·p)/2^256 < 2p`, so the final `pend` is `0` or `1`.
+fn mont_reduce(mut t: [u64; 8]) -> [u64; 4] {
+    let mut pend: u64 = 0;
     let mut i = 0;
     while i < 4 {
+        let m = t[i].wrapping_mul(N0INV);
+        let mp = (m as u128) * (POLY3 as u128);
+        let s1 = (t[i + 1] as u128) + ((m << 32) as u128);
+        t[i + 1] = s1 as u64;
+        let s2 = (t[i + 2] as u128) + ((m >> 32) as u128) + (s1 >> 64);
+        t[i + 2] = s2 as u64;
+        let s3 = (t[i + 3] as u128) + ((mp as u64) as u128) + (s2 >> 64);
+        t[i + 3] = s3 as u64;
+        // Below 2^65, so the carry out is again a single bit.
+        let s4 = (t[i + 4] as u128) + (mp >> 64) + (s3 >> 64) + (pend as u128);
+        t[i + 4] = s4 as u64;
+        pend = (s4 >> 64) as u64;
+        i += 1;
+    }
+    reduce_once([t[4], t[5], t[6], t[7]], pend)
+}
+
+/// `a · b · R^{-1} mod p` for canonical `a`, `b`, by coarsely integrated
+/// operand scanning: the running value is five words plus a carry word, and
+/// each of the four passes adds one row `a · b[i]` of the product and then
+/// reduces one word away.
+///
+/// The reduction round is the one of [`mont_reduce`] followed by the shift
+/// down by a word, so the additions land at `acc[1..5]` and `acc[0]` leaves.
+/// If `a` is canonical the running value stays below `2p`: a pass takes
+/// `S` to `(S + a·b[i] + m·p)/2^64`, and `2p + p·(2^64-1) + (2^64-1)·p`
+/// is `2p·2^64`. The accumulator therefore never needs a seventh word, and
+/// `acc[4]` at the end is `0` or `1`.
+fn mont_mul_limbs(a: [u64; 4], b: [u64; 4]) -> [u64; 4] {
+    let mut acc = [0u64; 6];
+    let mut i = 0;
+    while i < 4 {
+        // acc += a · b[i]. Each step is below 2^128:
+        // (2^64-1) + (2^64-1)^2 + (2^64-1) = 2^128 - 1.
+        let bi = b[i] as u128;
         let mut carry: u128 = 0;
         let mut j = 0;
         while j < 4 {
-            // Below 2^128: (2^64-1) + (2^64-1)^2 + (2^64-1) = 2^128 - 1.
-            let s = (t[i + j] as u128) + (a[j] as u128) * (b[i] as u128) + carry;
+            let s = (acc[j] as u128) + (a[j] as u128) * bi + carry;
+            acc[j] = s as u64;
+            carry = s >> 64;
+            j += 1;
+        }
+        let s = (acc[4] as u128) + carry;
+        acc[4] = s as u64;
+        acc[5] = (s >> 64) as u64;
+        // One reduction round, then the shift down by a word.
+        let m = acc[0].wrapping_mul(N0INV);
+        let mp = (m as u128) * (POLY3 as u128);
+        let s1 = (acc[1] as u128) + ((m << 32) as u128);
+        let s2 = (acc[2] as u128) + ((m >> 32) as u128) + (s1 >> 64);
+        let s3 = (acc[3] as u128) + ((mp as u64) as u128) + (s2 >> 64);
+        let s4 = (acc[4] as u128) + (mp >> 64) + (s3 >> 64);
+        let s5 = (acc[5] as u128) + (s4 >> 64);
+        acc[0] = s1 as u64;
+        acc[1] = s2 as u64;
+        acc[2] = s3 as u64;
+        acc[3] = s4 as u64;
+        acc[4] = s5 as u64;
+        acc[5] = 0;
+        i += 1;
+    }
+    reduce_once([acc[0], acc[1], acc[2], acc[3]], acc[4])
+}
+
+/// `a · a · R^{-1} mod p` for canonical `a`, in ten 64×64 products rather
+/// than the sixteen of a general product.
+///
+/// `a^2` is `2·C + D`, where `C` is the strictly upper triangle
+/// `Σ_{i<j} a_i·a_j·2^{64(i+j)}` — six products, since `a_i·a_j = a_j·a_i` —
+/// and `D` is the diagonal `Σ_i a_i^2·2^{128i}`, four products. `2·C ≤ a^2`
+/// and `a^2 < 2^512`, so `C` is below `2^511` and the doubling stays inside
+/// the eight words; the diagonal sum is `a^2` itself, so its carry out of
+/// the top word is zero. `a^2 ≤ (p-1)^2 < p·2^256` is the precondition of
+/// [`mont_reduce`].
+fn mont_sqr_limbs(a: [u64; 4]) -> [u64; 4] {
+    let mut t = [0u64; 8];
+    // The strictly upper triangle. Row `i` ends at word `i+4`, which no
+    // earlier row has written, so the row carry is a store rather than an add.
+    let mut i = 0;
+    while i < 4 {
+        let mut carry: u128 = 0;
+        let mut j = i + 1;
+        while j < 4 {
+            let s = (t[i + j] as u128) + (a[i] as u128) * (a[j] as u128) + carry;
             t[i + j] = s as u64;
             carry = s >> 64;
             j += 1;
@@ -238,34 +335,28 @@ fn mont_mul_limbs(a: [u64; 4], b: [u64; 4]) -> [u64; 4] {
         t[i + 4] = carry as u64;
         i += 1;
     }
-
-    // Step 2: four rounds of Montgomery reduction.
+    // Double it.
+    let mut bit: u64 = 0;
+    let mut k = 0;
+    while k < 8 {
+        let top = t[k] >> 63;
+        t[k] = (t[k] << 1) | bit;
+        bit = top;
+        k += 1;
+    }
+    // Add the diagonal, whose carry out of word `2i+1` lands on word `2i+2`.
+    let mut c: u128 = 0;
     i = 0;
     while i < 4 {
-        let m = t[i].wrapping_mul(N0INV);
-        let mut carry: u128 = 0;
-        let mut j = 0;
-        while j < 4 {
-            let s = (t[i + j] as u128) + (m as u128) * (P_LIMBS[j] as u128) + carry;
-            t[i + j] = s as u64;
-            carry = s >> 64;
-            j += 1;
-        }
-        // Propagate the carry through the remaining words. The loop runs to
-        // the top of the accumulator rather than stopping at the first zero
-        // carry, so the index stays in bounds by construction.
-        let mut k = i + 4;
-        while k < 9 {
-            let s = (t[k] as u128) + carry;
-            t[k] = s as u64;
-            carry = s >> 64;
-            k += 1;
-        }
+        let sq = (a[i] as u128) * (a[i] as u128);
+        let s = (t[2 * i] as u128) + ((sq as u64) as u128) + c;
+        t[2 * i] = s as u64;
+        let s2 = (t[2 * i + 1] as u128) + (sq >> 64) + (s >> 64);
+        t[2 * i + 1] = s2 as u64;
+        c = s2 >> 64;
         i += 1;
     }
-
-    // Steps 3 and 4: take the high half and subtract p at most once.
-    reduce_once([t[4], t[5], t[6], t[7]], t[8])
+    mont_reduce(t)
 }
 
 // --- exponentiation -------------------------------------------------------------
@@ -275,7 +366,7 @@ fn sqr_n(a: [u64; 4], n: usize) -> [u64; 4] {
     let mut r = a;
     let mut i = 0;
     while i < n {
-        r = mont_mul_limbs(r, r);
+        r = mont_sqr_limbs(r);
         i += 1;
     }
     r
@@ -410,8 +501,10 @@ impl Field for Fp256Mont {
         Fp256Mont(sub_mod([0, 0, 0, 0], self.0))
     }
 
+    /// Montgomery squaring of the representative, through the ten-product
+    /// [`mont_sqr_limbs`] rather than [`mont_mul_limbs`] at equal operands.
     fn square(self) -> Self {
-        Fp256Mont(mont_mul_limbs(self.0, self.0))
+        Fp256Mont(mont_sqr_limbs(self.0))
     }
 
     fn double(self) -> Self {
@@ -804,6 +897,152 @@ mod tests {
                 assert_eq!(x.to_mont().mont_mul(y.to_mont()), x.mul(y).to_mont());
             }
         }
+    }
+
+    // --- the carry paths of the multiply and the squaring ---------------------
+
+    /// Canonical *representatives* chosen for the carry paths: the ends of the
+    /// range, the largest value below `p`, single saturated limbs, and the
+    /// limb patterns of `p` and `R`. A representative `L` denotes the field
+    /// value `L·R^{-1}`, which is how the reference is built below.
+    fn representative_edges() -> Vec<[u64; 4]> {
+        vec![
+            [0, 0, 0, 0],
+            [1, 0, 0, 0],
+            [2, 0, 0, 0],
+            // p - 1 and p - 2, the top of the range.
+            [
+                0xFFFF_FFFF_FFFF_FFFE,
+                0x0000_0000_FFFF_FFFF,
+                0x0000_0000_0000_0000,
+                0xFFFF_FFFF_0000_0001,
+            ],
+            P_MINUS_TWO,
+            // The largest representative whose every low limb is saturated:
+            // its top limb is one below the top limb of p.
+            [
+                0xFFFF_FFFF_FFFF_FFFF,
+                0xFFFF_FFFF_FFFF_FFFF,
+                0xFFFF_FFFF_FFFF_FFFF,
+                0xFFFF_FFFF_0000_0000,
+            ],
+            [
+                0xFFFF_FFFF_FFFF_FFFF,
+                0xFFFF_FFFF_FFFF_FFFF,
+                0xFFFF_FFFF_FFFF_FFFF,
+                0x0000_0000_0000_0000,
+            ],
+            // One saturated limb at a time, and one set bit at a time.
+            [0xFFFF_FFFF_FFFF_FFFF, 0, 0, 0],
+            [0, 0xFFFF_FFFF_FFFF_FFFF, 0, 0],
+            [0, 0, 0xFFFF_FFFF_FFFF_FFFF, 0],
+            [0, 0, 0, 0xFFFF_FFFF_0000_0000],
+            [0, 0, 0, 1],
+            [0, 0, 0, 0x8000_0000_0000_0000],
+            [0x8000_0000_0000_0000, 0, 0, 0],
+            // The limb patterns the reduction is built around.
+            R_LIMBS,
+            R2_LIMBS,
+            [0, 0x0000_0000_FFFF_FFFF, 0, 0],
+            [0x0000_0000_FFFF_FFFF, 0, 0, 0],
+        ]
+    }
+
+    /// The edge representatives followed by pseudorandom canonical ones.
+    fn representative_sample(count: usize) -> Vec<[u64; 4]> {
+        let mut out = representative_edges();
+        let mut rng = SplitMix64::new(0x5EED_0F_CA_11_AB_1E);
+        let mut i = 0;
+        while i < count {
+            let v = [
+                rng.next_u64(),
+                rng.next_u64(),
+                rng.next_u64(),
+                rng.next_u64(),
+            ];
+            out.push(reduce_once(v, 0));
+            i += 1;
+        }
+        out
+    }
+
+    /// The reference element of the same field value as the representative
+    /// `v`, namely `v·R^{-1}`.
+    fn slow_of_representative(v: [u64; 4]) -> Fp256 {
+        Fp256::from_bytes(&le(v)).from_mont()
+    }
+
+    #[test]
+    fn the_chosen_representatives_are_canonical() {
+        for v in representative_sample(64) {
+            let (_, borrow) = sub_limbs(v, P_LIMBS);
+            assert_eq!(borrow, 1, "representative {v:?} is not below p");
+        }
+    }
+
+    /// Products and squares at the representative edges, against the
+    /// `num-bigint` instance. These are the inputs that drive the carry out of
+    /// the top word of the accumulator and the final conditional subtraction.
+    #[test]
+    fn representative_products_agree_with_the_bigint_instance() {
+        let inputs = representative_sample(24);
+        for a in &inputs {
+            let (xa, ya) = (Fp256Mont(*a), slow_of_representative(*a));
+            agree("square at an edge representative", xa.square(), ya.square());
+            assert_eq!(xa.square(), xa.mul(xa), "square against mul at {a:?}");
+            for b in &inputs {
+                let (xb, yb) = (Fp256Mont(*b), slow_of_representative(*b));
+                agree("mul at an edge representative", xa.mul(xb), ya.mul(yb));
+                agree("add at an edge representative", xa.add(xb), ya.add(yb));
+                agree("sub at an edge representative", xa.sub(xb), ya.sub(yb));
+            }
+        }
+    }
+
+    /// The ten-product squaring and the sixteen-product multiplication are two
+    /// routes through two different reductions; they must not diverge on any
+    /// input.
+    #[test]
+    fn squaring_agrees_with_multiplying_by_itself() {
+        for b in sample_inputs(512) {
+            let x = fast(&b);
+            assert_eq!(x.square(), x.mul(x), "square against mul");
+        }
+        for v in representative_sample(256) {
+            let x = Fp256Mont(v);
+            assert_eq!(x.square(), x.mul(x), "square against mul at {v:?}");
+        }
+    }
+
+    /// The conditional subtraction at both settings of the carry out of the
+    /// top word. `reduce_once` takes an argument below `2p`, so at `hi = 1`
+    /// the low half is below `2p - 2^256 = p - R` and the result is `lo + R`,
+    /// since `R = 2^256 - p`.
+    #[test]
+    fn reduce_once_handles_the_carry_out_of_the_top_word() {
+        let mut covered = 0;
+        for v in representative_sample(64) {
+            let (sum, carry) = add_limbs(v, R_LIMBS);
+            assert_eq!(carry, 0, "lo + R stays in 256 bits for lo below p");
+            let (_, below_p) = sub_limbs(sum, P_LIMBS);
+            if below_p == 1 {
+                assert_eq!(reduce_once(v, 1), sum, "reduce_once at hi = 1");
+                covered += 1;
+            }
+            assert_eq!(reduce_once(v, 0), v, "reduce_once at hi = 0");
+        }
+        assert!(covered > 4, "the hi = 1 branch went unexercised");
+        // p itself, the boundary at hi = 0.
+        assert_eq!(reduce_once(P_LIMBS, 0), [0, 0, 0, 0]);
+        // The largest argument the contract allows at hi = 1 is 2p - 1, whose
+        // low half is p - R - 1 and whose reduction is p - 1.
+        let (p_minus_r, borrow) = sub_limbs(P_LIMBS, R_LIMBS);
+        assert_eq!(borrow, 0);
+        let (top, borrow) = sub_limbs(p_minus_r, [1, 0, 0, 0]);
+        assert_eq!(borrow, 0);
+        let (p_minus_one, borrow) = sub_limbs(P_LIMBS, [1, 0, 0, 0]);
+        assert_eq!(borrow, 0);
+        assert_eq!(reduce_once(top, 1), p_minus_one, "reduce_once at 2p - 1");
     }
 
     // --- the ring operations ------------------------------------------------
