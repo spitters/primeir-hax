@@ -12,6 +12,13 @@ default = ["bigint-instances"]
 # surface plus the `mldsa_q` instance, is `no_std` and has no dependency, so a
 # `no_std` crate can implement the traits.
 bigint-instances = ["dep:num-bigint"]
+# The fixed-width instance `fp256_mont`: the P-256 base field as four u64
+# Montgomery-domain limbs, with no allocation and no dependency, so it is
+# available to a `no_std` consumer. Off by default, so `bigint-instances`
+# stays the only instance a default build carries. Its differential tests
+# compare it against `fp256` and so need `bigint-instances` as well:
+# `cargo test --features fixed-width-instances`.
+fixed-width-instances = []
 
 [dependencies]
 # The reference instance (opaque arithmetic leaf) is realized with num-bigint.

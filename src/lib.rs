@@ -306,6 +306,12 @@ pub mod fp25519;
 #[cfg(all(not(hax), feature = "bigint-instances"))]
 pub mod fp256;
 
+// The fixed-width instance of the same field: four `u64` Montgomery-domain
+// limbs, no allocation and no dependency. An opaque arithmetic leaf, gated out
+// of the extraction like `fp256`.
+#[cfg(all(not(hax), feature = "fixed-width-instances"))]
+pub mod fp256_mont;
+
 // The polynomial-ring op family (`PolyOp`), on the extraction surface.
 pub mod poly;
 pub mod ct;
