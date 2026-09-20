@@ -73,8 +73,13 @@ impl Field for Fq {
     }
     fn pow(self, exp: &[u64]) -> Self {
         let mut acc = Fq(1);
-        for limb in exp.iter().rev() {
-            for bit in (0..64).rev() {
+        let mut j = exp.len();
+        while j > 0 {
+            j -= 1;
+            let limb = exp[j];
+            let mut bit = 64;
+            while bit > 0 {
+                bit -= 1;
                 acc = acc.mul(acc);
                 if (limb >> bit) & 1 == 1 {
                     acc = acc.mul(self);
@@ -85,8 +90,10 @@ impl Field for Fq {
     }
     fn from_bytes(bytes: &[u8]) -> Self {
         let mut acc = 0u64;
-        for &b in bytes.iter().rev() {
-            acc = (acc * 256 + b as u64) % Q;
+        let mut i = bytes.len();
+        while i > 0 {
+            i -= 1;
+            acc = (acc * 256 + bytes[i] as u64) % Q;
         }
         Fq(acc as u32)
     }
@@ -142,6 +149,7 @@ impl PolyRing for PolyDsa {
     type NttForm = NttDsa;
     const N: usize = 256;
     const ZERO: Self = PolyDsa([0u32; 256]);
+    const NTT_ZERO: NttDsa = NttDsa([0u32; 256]);
 
     fn coeff(self, i: usize) -> Fq {
         Fq(self.0[i])
@@ -153,6 +161,13 @@ impl PolyRing for PolyDsa {
     }
     fn ntt_coeff(w: NttDsa, i: usize) -> Fq {
         Fq(w.0[i])
+    }
+    /// Entry replacement in the flat array of 256 entries of `T_q`, the step
+    /// `ExpandA` (FIPS 204 Algorithm 32) samples with.
+    fn with_ntt_coeff(w: NttDsa, i: usize, c: Fq) -> NttDsa {
+        let mut v = w;
+        v.0[i] = c.0;
+        v
     }
 
     /// FIPS 204 Algorithm 41: `ŵ[i] = w(ζ^(2·BitRev8(i) + 1))`.
@@ -196,8 +211,8 @@ impl PolyRing for PolyDsa {
             }
             len *= 2;
         }
-        for c in w.iter_mut() {
-            *c = Fq(*c).mul(Fq(INV_256)).0;
+        for i in 0..256 {
+            w[i] = Fq(w[i]).mul(Fq(INV_256)).0;
         }
         PolyDsa(w)
     }
@@ -215,6 +230,14 @@ impl PolyRing for PolyDsa {
         let mut w = [0u32; 256];
         for i in 0..256 {
             w[i] = Fq(a.0[i]).add(Fq(b.0[i])).0;
+        }
+        NttDsa(w)
+    }
+    /// The entry-wise difference in NTT form, the counterpart of Algorithm 44.
+    fn ntt_sub(a: NttDsa, b: NttDsa) -> NttDsa {
+        let mut w = [0u32; 256];
+        for i in 0..256 {
+            w[i] = Fq(a.0[i]).sub(Fq(b.0[i])).0;
         }
         NttDsa(w)
     }

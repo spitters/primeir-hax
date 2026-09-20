@@ -104,8 +104,10 @@ impl Field for Fp25519 {
     fn pow(self, exp: &[u64]) -> Self {
         // Assemble the little-endian u64 limbs into a BigUint exponent.
         let mut e = BigUint::from(0u8);
-        for (i, limb) in exp.iter().enumerate() {
-            e += BigUint::from(*limb) << (64 * i);
+        let mut i = 0;
+        while i < exp.len() {
+            e += BigUint::from(exp[i]) << (64 * i);
+            i += 1;
         }
         Fp25519::from_big(self.to_big().modpow(&e, &p()))
     }
@@ -214,7 +216,9 @@ impl EcGroup for Edwards25519 {
         let mut acc = Self::IDENTITY;
         // 253 bits suffice for scalars below the group order 2^252 + ...; iterate
         // the full 256 bits of the representation to be safe.
-        for i in (0..256).rev() {
+        let mut i = 256;
+        while i > 0 {
+            i -= 1;
             acc = acc.point_double();
             if k.bit(i) {
                 acc = acc.point_add(self);

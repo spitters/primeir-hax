@@ -5,10 +5,10 @@
 
 use primeir_hax::mldsa_q::*;
 use primeir_hax::poly::{
-    mlwe_entry_demo, ntt_dot2_demo, ntt_sample_demo, poly_mul_demo, NttSample, PolyRing,
+    mlwe_entry_demo, ntt_dot2_demo, ntt_residual_demo, ntt_sample_demo, poly_mul_demo, PolyRing,
     MODULUS_MLDSA,
 };
-use primeir_hax::poly_laws::check_all;
+use primeir_hax::poly_laws::check_poly_ring;
 use primeir_hax::{Field, ModArith};
 
 const Q: u32 = MODULUS_MLDSA;
@@ -105,6 +105,11 @@ fn transforms_agree_with_the_specification_crate() {
             mldsa_hax::multiply_ntt(&w.0, &v.0)
         );
         assert_eq!(PolyDsa::ntt_add(w.ntt(), v.ntt()), w.poly_add(v).ntt());
+        assert_eq!(PolyDsa::ntt_sub(w.ntt(), v.ntt()), w.poly_sub(v).ntt());
+        assert_eq!(
+            PolyDsa::ntt_sub(NttDsa(w.0), NttDsa(v.0)).0,
+            mldsa_hax::poly_sub(&w.0, &v.0)
+        );
         assert_eq!(w.poly_add(v).0, mldsa_hax::poly_add(&w.0, &v.0));
         assert_eq!(w.poly_sub(v).0, mldsa_hax::poly_sub(&w.0, &v.0));
         assert_eq!(w.poly_smul(Fq(1753)).0, mldsa_hax::poly_scalar_mul(1753, &w.0));
@@ -143,18 +148,18 @@ fn ntt_form_is_built_entry_by_entry() {
     // What ExpandA (FIPS 204 Algorithm 32) does: fill the entries of an element
     // of T_q directly, without applying the transform.
     let w = lcg_poly(11);
-    let mut built = <PolyDsa as NttSample>::NTT_ZERO;
+    let mut built = PolyDsa::NTT_ZERO;
     for i in 0..256 {
         built = ntt_sample_demo::<PolyDsa>(built, i, PolyDsa::ntt_coeff(w.ntt(), i));
     }
     assert_eq!(built, w.ntt());
     assert_eq!(PolyDsa::intt(built), w);
-    assert_eq!(<PolyDsa as NttSample>::NTT_ZERO, PolyDsa::ZERO.ntt());
+    assert_eq!(PolyDsa::NTT_ZERO, PolyDsa::ZERO.ntt());
 }
 
 #[test]
 fn the_law_suite_of_the_surface() {
-    check_all::<PolyDsa>("mldsa_q", 0x0204_0204, 3);
+    check_poly_ring::<PolyDsa>("mldsa_q", 0x0204_0204, 3);
 }
 
 #[test]
@@ -167,5 +172,11 @@ fn mlwe_entry_is_a_times_s_plus_e() {
     assert_eq!(
         PolyDsa::intt(dot),
         schoolbook_negacyclic(&a, &v0).poly_add(schoolbook_negacyclic(&a1, &v1))
+    );
+    // (a·z − c·t) computed in NTT form, the residual of Algorithm 8 line 11.
+    let residual = ntt_residual_demo::<PolyDsa>(a.ntt(), v0.ntt(), a1.ntt(), v1.ntt());
+    assert_eq!(
+        PolyDsa::intt(residual),
+        schoolbook_negacyclic(&a, &v0).poly_sub(schoolbook_negacyclic(&a1, &v1))
     );
 }

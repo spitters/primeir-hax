@@ -44,8 +44,8 @@
 //! ## Scope
 //!
 //! Four trait families: Field / ModArith / EC here, and the polynomial-ring
-//! family [`poly::PolyRing`] (`ntt`, `intt`, `basemul`, `poly_add`, `poly_sub`,
-//! `poly_smul`, `ntt_mul`) with its extension [`poly::NttSample`] (building an
+//! family [`poly::PolyRing`] (`ntt`, `intt`, `basemul`, `ntt_add`, `ntt_sub`,
+//! `poly_add`, `poly_sub`, `poly_smul`, `ntt_mul`, and the construction of an
 //! element in NTT form entry by entry, as a sampler in NTT form does), which
 //! names the operations of the `polyDialect`
 //! (`PolyOp`); plus the constant-time family [`ct::CtField`] and the
@@ -53,10 +53,10 @@
 //! Reference instances: `fp25519` for `Field`, `ModArith`, `EcGroup`,
 //! `CtField` and `SqrtRatio`; `fp256` (the NIST P-256 prime) for `Field`,
 //! `ModArith`, `CtField` and `SqrtRatio`; `mldsa_q` (the ML-DSA modulus
-//! `q = 8380417` and `Z_q[X]/(X^256 + 1)`) for `Field`, `ModArith`,
-//! `PolyRing` and `NttSample`; and `mlkem_q` (the ML-KEM modulus `q = 3329`
+//! `q = 8380417` and `Z_q[X]/(X^256 + 1)`) for `Field`, `ModArith` and
+//! `PolyRing`; and `mlkem_q` (the ML-KEM modulus `q = 3329`
 //! and the same ring, with the incomplete 7-layer transform of FIPS 203) for
-//! `Field`, `PolyRing` and `NttSample`. [`poly_laws`] holds the law suite of
+//! `Field` and `PolyRing`. [`poly_laws`] holds the law suite of
 //! the lattice surface as generic checks, which both lattice instances pass.
 //!
 //! ## Features

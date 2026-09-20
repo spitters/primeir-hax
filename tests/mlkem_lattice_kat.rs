@@ -12,7 +12,7 @@
 
 use primeir_hax::mlkem_q::*;
 use primeir_hax::poly::{PolyRing, MODULUS_MLKEM};
-use primeir_hax::poly_laws::{check_all, schoolbook_negacyclic, Lcg};
+use primeir_hax::poly_laws::{check_poly_ring, schoolbook_negacyclic, Lcg};
 use primeir_hax::Field;
 
 const Q: u32 = MODULUS_MLKEM;
@@ -175,5 +175,5 @@ fn ntt_mul_is_the_negacyclic_product() {
 
 #[test]
 fn the_law_suite_of_the_surface() {
-    check_all::<PolyKem>("mlkem_q", 0x0203_0203, 3);
+    check_poly_ring::<PolyKem>("mlkem_q", 0x0203_0203, 3);
 }

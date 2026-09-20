@@ -109,8 +109,10 @@ impl Field for Fp256 {
     fn pow(self, exp: &[u64]) -> Self {
         // Assemble the little-endian u64 limbs into a BigUint exponent.
         let mut e = BigUint::from(0u8);
-        for (i, limb) in exp.iter().enumerate() {
-            e += BigUint::from(*limb) << (64 * i);
+        let mut i = 0;
+        while i < exp.len() {
+            e += BigUint::from(exp[i]) << (64 * i);
+            i += 1;
         }
         Fp256::from_big(self.to_big().modpow(&e, &p()))
     }

@@ -1,7 +1,6 @@
 //! Reference instance of the prime-IR lattice surface at the ML-KEM modulus
 //! `q = 3329`: the field [`Fq`] ([`Field`]) and the ring [`PolyKem`] =
-//! `Z_q[X]/(X^256 + 1)` ([`PolyRing`], [`NttSample`]) with the NTT of
-//! FIPS 203 §4.3.
+//! `Z_q[X]/(X^256 + 1)` ([`PolyRing`]) with the NTT of FIPS 203 §4.3.
 //!
 //! The transform is **incomplete**: it runs 7 layers, not 8, so it splits
 //! `X^256 + 1` into 128 quadratic factors `X² − γ_i` with
@@ -24,7 +23,7 @@
 // Indexed loops mirror the index-by-index statement of the algorithms.
 #![allow(clippy::needless_range_loop)]
 
-use crate::poly::{NttSample, PolyRing, MODULUS_MLKEM};
+use crate::poly::{PolyRing, MODULUS_MLKEM};
 use crate::Field;
 
 const Q: u32 = MODULUS_MLKEM;
@@ -92,8 +91,13 @@ impl Field for Fq {
     }
     fn pow(self, exp: &[u64]) -> Self {
         let mut acc = Fq(1);
-        for limb in exp.iter().rev() {
-            for bit in (0..64).rev() {
+        let mut j = exp.len();
+        while j > 0 {
+            j -= 1;
+            let limb = exp[j];
+            let mut bit = 64;
+            while bit > 0 {
+                bit -= 1;
                 acc = acc.mul(acc);
                 if (limb >> bit) & 1 == 1 {
                     acc = acc.mul(self);
@@ -104,8 +108,10 @@ impl Field for Fq {
     }
     fn from_bytes(bytes: &[u8]) -> Self {
         let mut acc = 0u32;
-        for &b in bytes.iter().rev() {
-            acc = (acc * 256 + b as u32) % Q;
+        let mut i = bytes.len();
+        while i > 0 {
+            i -= 1;
+            acc = (acc * 256 + bytes[i] as u32) % Q;
         }
         Fq(acc as u16)
     }
@@ -175,6 +181,7 @@ impl PolyRing for PolyKem {
     type NttForm = NttKem;
     const N: usize = 256;
     const ZERO: Self = PolyKem([0u16; 256]);
+    const NTT_ZERO: NttKem = NttKem([[0u16; 2]; BLOCKS]);
 
     fn coeff(self, i: usize) -> Fq {
         Fq(self.0[i])
@@ -187,6 +194,13 @@ impl PolyRing for PolyKem {
     /// Entry `i` of the NTT form: coefficient `i mod 2` of residue `i / 2`.
     fn ntt_coeff(w: NttKem, i: usize) -> Fq {
         Fq(w.0[i >> 1][i & 1])
+    }
+    /// Entry replacement at the same address: coefficient `i mod 2` of residue
+    /// `i / 2`, the step `Â` (FIPS 203 Algorithm 13) samples with.
+    fn with_ntt_coeff(w: NttKem, i: usize, c: Fq) -> NttKem {
+        let mut v = w;
+        v.0[i >> 1][i & 1] = c.0;
+        v
     }
 
     /// FIPS 203 Algorithm 9: seven layers, leaving the 128 residues
@@ -231,8 +245,8 @@ impl PolyRing for PolyKem {
             }
             len <<= 1;
         }
-        for c in w.iter_mut() {
-            *c = Fq(*c).mul(Fq(INV_128)).0;
+        for i in 0..256 {
+            w[i] = Fq(w[i]).mul(Fq(INV_128)).0;
         }
         PolyKem(w)
     }
@@ -259,6 +273,14 @@ impl PolyRing for PolyKem {
         }
         NttKem(w)
     }
+    fn ntt_sub(a: NttKem, b: NttKem) -> NttKem {
+        let mut w = [[0u16; 2]; BLOCKS];
+        for i in 0..BLOCKS {
+            w[i][0] = Fq(a.0[i][0]).sub(Fq(b.0[i][0])).0;
+            w[i][1] = Fq(a.0[i][1]).sub(Fq(b.0[i][1])).0;
+        }
+        NttKem(w)
+    }
     fn poly_add(self, rhs: Self) -> Self {
         let mut w = [0u16; 256];
         for i in 0..256 {
@@ -282,15 +304,5 @@ impl PolyRing for PolyKem {
     }
     fn ntt_mul(self, rhs: Self) -> Self {
         Self::intt(Self::basemul(self.ntt(), rhs.ntt()))
-    }
-}
-
-impl NttSample for PolyKem {
-    const NTT_ZERO: NttKem = NttKem([[0u16; 2]; BLOCKS]);
-
-    fn with_ntt_coeff(w: NttKem, i: usize, c: Fq) -> NttKem {
-        let mut v = w;
-        v.0[i >> 1][i & 1] = c.0;
-        v
     }
 }

@@ -18,17 +18,21 @@
 //! | `poly_smul`       | `polySMul` | `polyC → polyC`              | product with a scalar                  |
 //! | `ntt_mul`         | `nttMul`   | `polyC → polyC → polyC`      | product in the ring                    |
 //! | `ntt_add`         | —          | `polyN → polyN → polyN`      | sum of two elements in NTT form        |
+//! | `ntt_sub`         | —          | `polyN → polyN → polyN`      | difference of two elements in NTT form |
 //! | `ntt_coeff`       | —          | `polyN → usize → Coeff`      | entry of an element in NTT form        |
 //! | `with_ntt_coeff`  | —          | `polyN → usize → Coeff → polyN` | entry replacement in NTT form       |
 //!
 //! `ntt_add` is AddNTT of FIPS 204 (Algorithm 44), which a matrix-vector product
-//! in NTT form needs; `PolyOp` has no operation for it, and by linearity of the
-//! transform it equals `ntt (poly_add (intt a) (intt b))`.
+//! in NTT form needs, and `ntt_sub` is the difference it pairs with, which the
+//! residual `â ∘ ẑ − ĉ ∘ t̂` of ML-DSA verification (Algorithm 8 line 11) needs.
+//! `PolyOp` has no operation for either, and by linearity of the transform they
+//! equal `ntt (poly_add (intt a) (intt b))` and `ntt (poly_sub (intt a) (intt b))`.
 //!
-//! [`PolyRing`] states the laws the operations satisfy; [`NttSample`] adds the
-//! two operations that build an element of `polyN` directly, which a scheme that
-//! samples in NTT form (ML-DSA's `ExpandA`, ML-KEM's `Â`) needs and which make
-//! `ntt ∘ intt = id` statable on an arbitrary element of `polyN`.
+//! `NTT_ZERO` and `with_ntt_coeff` build an element of `polyN` directly, which a
+//! scheme that samples in NTT form (ML-DSA's `ExpandA`, ML-KEM's `Â`) needs and
+//! which make `ntt ∘ intt = id` statable on an arbitrary element of `polyN`.
+//!
+//! [`PolyRing`] states the laws all of these operations satisfy.
 //!
 //! The order in which the transform lists its outputs is **not** fixed by the
 //! trait: it is part of the meaning of `ntt` at each instance, and a scheme that
@@ -72,9 +76,12 @@ use crate::Field;
 ///    that multiplication is entrywise in `Coeff` or blockwise over larger
 ///    factors depends on how far the transform splits `X^n + 1`, and is stated
 ///    by the instance, not here.
-/// 4. **`ntt_add` is the sum transported along the transform**:
-///    `Self::ntt_add(a.ntt(), b.ntt()) == a.poly_add(b).ntt()`. Equivalently
-///    `Self::intt(Self::ntt_add(w, v)) == Self::intt(w).poly_add(Self::intt(v))`.
+/// 4. **`ntt_add` and `ntt_sub` are the sum and the difference transported
+///    along the transform**: `Self::ntt_add(a.ntt(), b.ntt()) ==
+///    a.poly_add(b).ntt()` and `Self::ntt_sub(a.ntt(), b.ntt()) ==
+///    a.poly_sub(b).ntt()`. Equivalently `Self::intt(Self::ntt_add(w, v)) ==
+///    Self::intt(w).poly_add(Self::intt(v))` and
+///    `Self::intt(Self::ntt_sub(w, v)) == Self::intt(w).poly_sub(Self::intt(v))`.
 ///    Together with 3 this says `ntt` is a ring homomorphism.
 /// 5. **`poly_add`, `poly_sub` and `poly_smul` are coefficient-wise**:
 ///    `a.poly_add(b).coeff(i) == a_i.add(b_i)`, `a.poly_sub(b).coeff(i) ==
@@ -88,6 +95,18 @@ use crate::Field;
 ///    of it. The entries are elements of `Coeff` in both the complete and the
 ///    incomplete case; what an entry *means* — an evaluation, or one
 ///    coefficient of one of the `n/d` factors — is stated by the instance.
+/// 8. **`NTT_ZERO` and `with_ntt_coeff` build an element of `polyN` entry by
+///    entry**, without going through `ntt`, as a scheme that samples a matrix
+///    directly in NTT form does (ML-DSA's `ExpandA`, FIPS 204 Algorithm 32;
+///    ML-KEM's `Â`, FIPS 203 Algorithm 13). For `i != j`, both below `n`:
+///    `Self::ntt_coeff(Self::NTT_ZERO, i) == Coeff::ZERO` and
+///    `Self::NTT_ZERO == Self::ZERO.ntt()`;
+///    `Self::ntt_coeff(Self::with_ntt_coeff(w, i, c), i) == c`;
+///    `Self::ntt_coeff(Self::with_ntt_coeff(w, i, c), j) == Self::ntt_coeff(w, j)`;
+///    and every element of `NttForm` is reachable — filling all `n` entries of
+///    `NTT_ZERO` with the entries of `w` yields `w`. Reachability is what makes
+///    the second half of law 1 a statement about an arbitrary element of
+///    `polyN`, not only about one in the image of `ntt`.
 ///
 /// `crate::poly_laws` checks every one of these on pseudorandom inputs, for any
 /// implementor.
@@ -124,12 +143,17 @@ pub trait PolyRing: Copy + Clone + PartialEq {
     /// The zero polynomial.
     const ZERO: Self;
 
+    /// The zero of `polyN` — the transform of [`PolyRing::ZERO`].
+    const NTT_ZERO: Self::NttForm;
+
     /// Coefficient `i`, for `i < N`.
     fn coeff(self, i: usize) -> Self::Coeff;
     /// The polynomial with coefficient `i` replaced by `c`, for `i < N`.
     fn with_coeff(self, i: usize, c: Self::Coeff) -> Self;
     /// Entry `i` of an element in NTT form, for `i < N`.
     fn ntt_coeff(w: Self::NttForm, i: usize) -> Self::Coeff;
+    /// The element of `polyN` with entry `i` replaced by `c`, for `i < N`.
+    fn with_ntt_coeff(w: Self::NttForm, i: usize, c: Self::Coeff) -> Self::NttForm;
 
     /// `PolyOp.ntt`.
     fn ntt(self) -> Self::NttForm;
@@ -139,6 +163,8 @@ pub trait PolyRing: Copy + Clone + PartialEq {
     fn basemul(a: Self::NttForm, b: Self::NttForm) -> Self::NttForm;
     /// The sum of two elements in NTT form (FIPS 204 Algorithm 44).
     fn ntt_add(a: Self::NttForm, b: Self::NttForm) -> Self::NttForm;
+    /// The difference of two elements in NTT form.
+    fn ntt_sub(a: Self::NttForm, b: Self::NttForm) -> Self::NttForm;
     /// `PolyOp.polyAdd`.
     fn poly_add(self, rhs: Self) -> Self;
     /// `PolyOp.polySub`.
@@ -147,50 +173,6 @@ pub trait PolyRing: Copy + Clone + PartialEq {
     fn poly_smul(self, c: Self::Coeff) -> Self;
     /// `PolyOp.nttMul`: the product in `Z_q[X]/(X^n + 1)`.
     fn ntt_mul(self, rhs: Self) -> Self;
-}
-
-/// Building an element of `polyN` entry by entry, without going through
-/// [`PolyRing::ntt`].
-///
-/// A scheme that samples a matrix directly in NTT form needs this: ML-DSA's
-/// `ExpandA` (FIPS 204 Algorithm 32) and ML-KEM's `Â` (FIPS 203 Algorithm 13)
-/// both fill the entries of `polyN` from a XOF and never apply the transform.
-/// It also makes the second half of law 1 of [`PolyRing`] — `intt` followed by
-/// `ntt` is the identity — statable on an arbitrary element of `polyN` rather
-/// than only on one in the image of `ntt`.
-///
-/// The contract, for `i, j < N` with `i != j`:
-///
-/// * `Self::ntt_coeff(Self::NTT_ZERO, i) == Coeff::ZERO` and
-///   `Self::NTT_ZERO == Self::ZERO.ntt()`;
-/// * `Self::ntt_coeff(Self::with_ntt_coeff(w, i, c), i) == c`;
-/// * `Self::ntt_coeff(Self::with_ntt_coeff(w, i, c), j) == Self::ntt_coeff(w, j)`;
-/// * every element of `NttForm` is reachable: filling all `N` entries of
-///   `NTT_ZERO` with the entries of `w` yields `w`.
-pub trait NttSample: PolyRing {
-    /// The zero of `polyN` — the transform of [`PolyRing::ZERO`].
-    const NTT_ZERO: Self::NttForm;
-
-    /// The element of `polyN` with entry `i` replaced by `c`, for `i < N`.
-    fn with_ntt_coeff(w: Self::NttForm, i: usize, c: Self::Coeff) -> Self::NttForm;
-}
-
-// The two `NttSample` constructors of the ML-DSA instance, whose NTT form is a
-// flat array of 256 entries. Like the instance itself, they are gated out of
-// the extraction.
-#[cfg(not(hax))]
-impl NttSample for crate::mldsa_q::PolyDsa {
-    const NTT_ZERO: crate::mldsa_q::NttDsa = crate::mldsa_q::NttDsa([0u32; 256]);
-
-    fn with_ntt_coeff(
-        w: crate::mldsa_q::NttDsa,
-        i: usize,
-        c: crate::mldsa_q::Fq,
-    ) -> crate::mldsa_q::NttDsa {
-        let mut v = w;
-        v.0[i] = c.0;
-        v
-    }
 }
 
 /// A generic caller of [`PolyRing::ntt_mul`], so that an extraction contains a
@@ -218,10 +200,23 @@ pub fn ntt_dot2_demo<R: PolyRing>(
     R::ntt_add(R::basemul(a0, v0), R::basemul(a1, v1))
 }
 
-/// A generic caller of [`NttSample`]: the element of `polyN` whose entries are
-/// the entries of `w` with entry `i` replaced by `c`, built from
-/// [`NttSample::NTT_ZERO`] the way a sampler in NTT form builds one.
-pub fn ntt_sample_demo<R: NttSample>(w: R::NttForm, i: usize, c: R::Coeff) -> R::NttForm {
+/// A generic caller of [`PolyRing::ntt_sub`]: one entry of the residual
+/// `â ∘ ẑ − ĉ ∘ t̂` that ML-DSA verification forms in NTT form (FIPS 204
+/// Algorithm 8 line 11).
+pub fn ntt_residual_demo<R: PolyRing>(
+    a: R::NttForm,
+    z: R::NttForm,
+    c: R::NttForm,
+    t: R::NttForm,
+) -> R::NttForm {
+    R::ntt_sub(R::basemul(a, z), R::basemul(c, t))
+}
+
+/// A generic caller of [`PolyRing::with_ntt_coeff`]: the element of `polyN`
+/// whose entries are the entries of `w` with entry `i` replaced by `c`, the
+/// step by which a sampler in NTT form builds one from
+/// [`PolyRing::NTT_ZERO`].
+pub fn ntt_sample_demo<R: PolyRing>(w: R::NttForm, i: usize, c: R::Coeff) -> R::NttForm {
     R::with_ntt_coeff(w, i, c)
 }
 

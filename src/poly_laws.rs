@@ -1,14 +1,12 @@
-//! The law suite of [`PolyRing`] and [`NttSample`], as generic checks.
+//! The law suite of [`PolyRing`], as generic checks.
 //!
-//! Every law stated in the contract of [`PolyRing`] and of [`NttSample`] is
-//! checked here on pseudorandom inputs, for an arbitrary implementor. The two
-//! entry points are [`check_poly_ring`] (the laws an implementor of
-//! [`PolyRing`] must satisfy) and [`check_all`] (those plus the [`NttSample`]
-//! laws). A lattice specification crate that implements the traits for its own
-//! types runs the same suite against its instance:
+//! Every law stated in the contract of [`PolyRing`] is checked here on
+//! pseudorandom inputs, for an arbitrary implementor. The entry point is
+//! [`check_poly_ring`]. A lattice specification crate that implements the trait
+//! for its own types runs the same suite against its instance:
 //!
 //! ```ignore
-//! primeir_hax::poly_laws::check_all::<MyPoly>("my_poly", 0xA5A5, 3);
+//! primeir_hax::poly_laws::check_poly_ring::<MyPoly>("my_poly", 0xA5A5, 3);
 //! ```
 //!
 //! What the suite does **not** check is the evaluation ordering of `ntt` and
@@ -19,7 +17,9 @@
 //! The module is `core`-only and gated out of the hax extraction: it is test
 //! support that runs under rustc, not part of the surface an extraction sees.
 
-use crate::poly::{mlwe_entry_demo, ntt_dot2_demo, ntt_sample_demo, poly_mul_demo, NttSample, PolyRing};
+use crate::poly::{
+    mlwe_entry_demo, ntt_dot2_demo, ntt_residual_demo, ntt_sample_demo, poly_mul_demo, PolyRing,
+};
 use crate::Field;
 
 fn zero<F: Field>() -> F {
@@ -72,7 +72,7 @@ impl Lcg {
 
     /// A pseudorandom element in NTT form, built entry by entry as a sampler in
     /// NTT form builds one.
-    pub fn ntt_form<R: NttSample>(&mut self) -> R::NttForm {
+    pub fn ntt_form<R: PolyRing>(&mut self) -> R::NttForm {
         let mut w = R::NTT_ZERO;
         for i in 0..R::N {
             w = R::with_ntt_coeff(w, i, self.coeff::<R::Coeff>());
@@ -139,8 +139,7 @@ pub fn check_coefficient_access<R: PolyRing>(rng: &mut Lcg, label: &str) {
 
 /// Law 1, on the image of `ntt`: `intt ∘ ntt = id`, and `ntt ∘ intt = id` on an
 /// element of `polyN` obtained as a transform. The second half of law 1 on an
-/// arbitrary element of `polyN` needs [`NttSample`] and is
-/// [`check_transform_bijection`].
+/// arbitrary element of `polyN` is [`check_transform_bijection`].
 pub fn check_transform_roundtrip<R: PolyRing>(rng: &mut Lcg, label: &str) {
     let a: R = rng.poly();
     assert!(R::intt(a.ntt()) == a, "{label}: intt ∘ ntt is not the identity");
@@ -151,8 +150,9 @@ pub fn check_transform_roundtrip<R: PolyRing>(rng: &mut Lcg, label: &str) {
     assert!(R::intt(R::ZERO.ntt()) == R::ZERO, "{label}: the transform moves ZERO");
 }
 
-/// Law 1 on an arbitrary element of `polyN`, plus the [`NttSample`] contract.
-pub fn check_transform_bijection<R: NttSample>(rng: &mut Lcg, label: &str) {
+/// Law 1 on an arbitrary element of `polyN`, plus law 8 — the construction of
+/// an element of `polyN` entry by entry.
+pub fn check_transform_bijection<R: PolyRing>(rng: &mut Lcg, label: &str) {
     assert!(
         R::NTT_ZERO == R::ZERO.ntt(),
         "{label}: NTT_ZERO is not the transform of ZERO"
@@ -225,7 +225,7 @@ pub fn check_coefficient_wise_ops<R: PolyRing>(rng: &mut Lcg, label: &str) {
     );
 }
 
-/// Law 4: `ntt_add` is the sum transported along the transform.
+/// Law 4, first half: `ntt_add` is the sum transported along the transform.
 pub fn check_ntt_add<R: PolyRing>(rng: &mut Lcg, label: &str) {
     let a: R = rng.poly();
     let b: R = rng.poly();
@@ -244,6 +244,36 @@ pub fn check_ntt_add<R: PolyRing>(rng: &mut Lcg, label: &str) {
             "{label}: ntt_add is not entry-wise at {i}"
         );
     }
+}
+
+/// Law 4, second half: `ntt_sub` is the difference transported along the
+/// transform.
+pub fn check_ntt_sub<R: PolyRing>(rng: &mut Lcg, label: &str) {
+    let a: R = rng.poly();
+    let b: R = rng.poly();
+    assert!(
+        R::ntt_sub(a.ntt(), b.ntt()) == a.poly_sub(b).ntt(),
+        "{label}: ntt_sub is not the difference transported along the transform"
+    );
+    assert!(
+        R::intt(R::ntt_sub(a.ntt(), b.ntt())) == a.poly_sub(b),
+        "{label}: intt of ntt_sub is not the difference"
+    );
+    for i in 0..R::N {
+        assert!(
+            R::ntt_coeff(R::ntt_sub(a.ntt(), b.ntt()), i)
+                == R::ntt_coeff(a.ntt(), i).sub(R::ntt_coeff(b.ntt(), i)),
+            "{label}: ntt_sub is not entry-wise at {i}"
+        );
+    }
+    assert!(
+        R::ntt_sub(a.ntt(), a.ntt()) == R::ZERO.ntt(),
+        "{label}: ntt_sub of an element with itself is not the transform of ZERO"
+    );
+    assert!(
+        R::ntt_add(R::ntt_sub(a.ntt(), b.ntt()), b.ntt()) == a.ntt(),
+        "{label}: ntt_sub is not the inverse of ntt_add"
+    );
 }
 
 /// Law 3: `basemul` is the ring product transported along the transform.
@@ -337,6 +367,11 @@ pub fn check_generic_callers<R: PolyRing>(rng: &mut Lcg, label: &str) {
         R::intt(dot) == schoolbook_negacyclic(a, s).poly_add(schoolbook_negacyclic(b, v)),
         "{label}: ntt_dot2_demo is not a0·v0 + a1·v1"
     );
+    let residual = ntt_residual_demo::<R>(a.ntt(), s.ntt(), b.ntt(), v.ntt());
+    assert!(
+        R::intt(residual) == schoolbook_negacyclic(a, s).poly_sub(schoolbook_negacyclic(b, v)),
+        "{label}: ntt_residual_demo is not a·z − c·t"
+    );
 }
 
 /// Every law of [`PolyRing`], on `rounds` pseudorandom inputs from `seed`.
@@ -346,20 +381,13 @@ pub fn check_poly_ring<R: PolyRing>(label: &str, seed: u64, rounds: usize) {
     for _ in 0..rounds {
         check_coefficient_access::<R>(&mut rng, label);
         check_transform_roundtrip::<R>(&mut rng, label);
+        check_transform_bijection::<R>(&mut rng, label);
         check_coefficient_wise_ops::<R>(&mut rng, label);
         check_ntt_add::<R>(&mut rng, label);
+        check_ntt_sub::<R>(&mut rng, label);
         check_basemul::<R>(&mut rng, label);
         check_ntt_mul_is_negacyclic::<R>(&mut rng, label);
         check_ring_axioms::<R>(&mut rng, label);
         check_generic_callers::<R>(&mut rng, label);
-    }
-}
-
-/// Every law of [`PolyRing`] and of [`NttSample`].
-pub fn check_all<R: NttSample>(label: &str, seed: u64, rounds: usize) {
-    check_poly_ring::<R>(label, seed, rounds);
-    let mut rng = Lcg::new(seed ^ 0x5DEE_CE66_D1B1_4A63);
-    for _ in 0..rounds {
-        check_transform_bijection::<R>(&mut rng, label);
     }
 }
