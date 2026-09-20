@@ -1,7 +1,7 @@
 //! The polynomial-ring op family of the prime-IR surface.
 //!
-//! [`PolyRing`] names the operations of the `polyDialect` of the CatCrypt
-//! compiler (`SecureCompilation/VIR/PolyDialect.lean`, `PolyOp`): each method
+//! [`PolyRing`] names the operations of a compiler's polynomial-ring dialect:
+//! each method
 //! carries the name of the dialect operation it denotes, so an extraction
 //! recognises a call by trait and method name and the realisation stays an
 //! opaque arithmetic leaf. As in the dialect, an element in coefficient form

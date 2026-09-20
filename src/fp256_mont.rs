@@ -4,10 +4,11 @@
 //! `Fp256Mont` is the field of order `p = 2^256 - 2^224 + 2^192 + 2^96 - 1`
 //! (FIPS 186-4; RFC 9380, Section 8.2), stored as four little-endian `u64`
 //! limbs in the Montgomery domain: the limbs of `x : Fp256Mont` hold the
-//! integer `value(x) · R mod p` with `R = 2^256`. It is the P-256 analogue of
-//! the radix-2^51 limb field `Fe51` of `ristretto255-hax`: the same trait
+//! integer `value(x) · R mod p` with `R = 2^256`. It carries the same trait
 //! surface as [`crate::fp256::Fp256`], realised without `num-bigint` and
-//! without a heap allocation on any path.
+//! without a heap allocation on any path. The limb arithmetic is written to
+//! match the fiat-crypto `p256_64` output, and the crate's own differential
+//! tests check it against the `num-bigint` reference instance.
 //!
 //! ## Representation
 //!

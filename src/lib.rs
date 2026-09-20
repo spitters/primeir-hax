@@ -8,8 +8,7 @@
 //! meant to map to, so `haxpipeT` can recognize a call **nominally** (by trait +
 //! method name, at the same `Adt`/impl site the secret-integer axis uses) and
 //! emit the corresponding prime-IR dialect op — *without reconstructing the op
-//! identity from limb-and-loop code*. See `HAX_REFERENCE_ROLE.md`
-//! §"The prime-IR representation" and `SecureCompilation/VIR/DIALECTS.md`.
+//! identity from limb-and-loop code*.
 //!
 //! ## Dual-use (the whole point, exactly as for `secret_integers`)
 //!
@@ -65,7 +64,7 @@
 //! realised with `num-bigint`. Without it the crate is the trait surface plus
 //! the two lattice instances `mldsa_q` and `mlkem_q` and the law suite
 //! [`poly_laws`], is `no_std` and has no dependency; that is how a `no_std`
-//! crate such as `mldsa-hax` implements the traits for its own types.
+//! crate implements the traits for its own types.
 
 #![forbid(unsafe_code)]
 // Without the `bigint-instances` feature the crate is the trait surface plus

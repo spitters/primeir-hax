@@ -3,8 +3,7 @@
 //! `CtField` at the reference instance `Fp25519`.
 //!
 //! The negative field elements are the eight canonical encodings listed under
-//! "Negative field elements" in RFC 9496, Appendix A.2. The full Appendix A
-//! runs through this instance in `ristretto255-hax/tests/generic_vectors.rs`.
+//! "Negative field elements" in RFC 9496, Appendix A.2.
 
 use primeir_hax::ct::{ct_abs_demo, ct_eq_up_to_sign_demo, CtField};
 use primeir_hax::fp25519::Fp25519;
