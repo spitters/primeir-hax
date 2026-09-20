@@ -8,31 +8,109 @@
 //! (`polyC q n`, the type implementing the trait) and an element in NTT form
 //! (`polyN q n`, [`PolyRing::NttForm`]) have different types.
 //!
-//! | method      | `PolyOp`   | type                         | meaning over `Z_q[X]/(X^n + 1)`        |
-//! |-------------|------------|------------------------------|----------------------------------------|
-//! | `ntt`       | `ntt`      | `polyC → polyN`              | coefficient form to NTT form           |
-//! | `intt`      | `intt`     | `polyN → polyC`              | NTT form to coefficient form           |
-//! | `basemul`   | `basemul`  | `polyN → polyN → polyN`      | product of two elements in NTT form    |
-//! | `poly_add`  | `polyAdd`  | `polyC → polyC → polyC`      | sum                                    |
-//! | `poly_sub`  | `polySub`  | `polyC → polyC → polyC`      | difference                             |
-//! | `poly_smul` | `polySMul` | `polyC → polyC`              | product with a scalar                  |
-//! | `ntt_mul`   | `nttMul`   | `polyC → polyC → polyC`      | product in the ring                    |
-//! | `ntt_add`   | —          | `polyN → polyN → polyN`      | sum of two elements in NTT form        |
+//! | method            | `PolyOp`   | type                         | meaning over `Z_q[X]/(X^n + 1)`        |
+//! |-------------------|------------|------------------------------|----------------------------------------|
+//! | `ntt`             | `ntt`      | `polyC → polyN`              | coefficient form to NTT form           |
+//! | `intt`            | `intt`     | `polyN → polyC`              | NTT form to coefficient form           |
+//! | `basemul`         | `basemul`  | `polyN → polyN → polyN`      | product of two elements in NTT form    |
+//! | `poly_add`        | `polyAdd`  | `polyC → polyC → polyC`      | sum                                    |
+//! | `poly_sub`        | `polySub`  | `polyC → polyC → polyC`      | difference                             |
+//! | `poly_smul`       | `polySMul` | `polyC → polyC`              | product with a scalar                  |
+//! | `ntt_mul`         | `nttMul`   | `polyC → polyC → polyC`      | product in the ring                    |
+//! | `ntt_add`         | —          | `polyN → polyN → polyN`      | sum of two elements in NTT form        |
+//! | `ntt_coeff`       | —          | `polyN → usize → Coeff`      | entry of an element in NTT form        |
+//! | `with_ntt_coeff`  | —          | `polyN → usize → Coeff → polyN` | entry replacement in NTT form       |
 //!
 //! `ntt_add` is AddNTT of FIPS 204 (Algorithm 44), which a matrix-vector product
 //! in NTT form needs; `PolyOp` has no operation for it, and by linearity of the
 //! transform it equals `ntt (poly_add (intt a) (intt b))`.
 //!
-//! The order of the NTT outputs is part of the meaning of `ntt`: a scheme that
-//! samples elements directly in NTT form (ML-DSA's `ExpandA`, FIPS 204
-//! Algorithm 32) observes it. An instance states its order; the ML-DSA instance
-//! is `ŵ[i] = w(ζ^(2·BitRev8(i) + 1))` with `ζ = 1753` (FIPS 204 §7.5).
+//! [`PolyRing`] states the laws the operations satisfy; [`NttSample`] adds the
+//! two operations that build an element of `polyN` directly, which a scheme that
+//! samples in NTT form (ML-DSA's `ExpandA`, ML-KEM's `Â`) needs and which make
+//! `ntt ∘ intt = id` statable on an arbitrary element of `polyN`.
+//!
+//! The order in which the transform lists its outputs is **not** fixed by the
+//! trait: it is part of the meaning of `ntt` at each instance, and a scheme that
+//! samples elements directly in NTT form observes it. Each instance states its
+//! own; see [`PolyRing`] §"What the trait leaves to the instance".
+//!
+//! Two instances live in this crate, both gated out of the extraction:
+//! `mldsa_q` (`q = 8380417`, `n = 256`, the complete 8-layer transform of
+//! FIPS 204 §7.5) and `mlkem_q` (`q = 3329`, `n = 256`, the incomplete 7-layer
+//! transform of FIPS 203 §4.3). They differ in how far the transform splits
+//! `X^n + 1`: ML-DSA's splits it into 256 linear factors, so `basemul` is 256
+//! scalar products; ML-KEM's stops one layer early at 128 quadratic factors, so
+//! `basemul` is 128 independent products of degree-1 polynomials. The trait
+//! accommodates both because `basemul` is the instance's own operation on the
+//! instance's own [`PolyRing::NttForm`].
 
 use crate::Field;
 
 /// A ring `Z_q[X]/(X^n + 1)` with a number-theoretic transform, over the
 /// coefficient field [`PolyRing::Coeff`]. `Self` is an element in coefficient
 /// form.
+///
+/// # The contract
+///
+/// Write `q` for the modulus of `Coeff`, `n` for [`PolyRing::N`], `R` for
+/// `Z_q[X]/(X^n + 1)` and `a_i` for `a.coeff(i)`. An implementor must satisfy,
+/// for all `a`, `b` of type `Self`, all `w`, `v` of type `Self::NttForm`, all
+/// `c : Coeff` and all `i < n`:
+///
+/// 1. **The transform is a bijection.** `Self::intt(a.ntt()) == a` and
+///    `Self::intt(w).ntt() == w`. Coefficient form and NTT form are two
+///    representations of the same element of `R`.
+/// 2. **`ntt_mul` is the product of `R`** — the negacyclic convolution
+///    `(a · b)_k = Σ_{i+j=k} a_i·b_j − Σ_{i+j=k+n} a_i·b_j`, reading `X^n = −1`.
+///    It is commutative and associative, distributes over `poly_add`, and has
+///    the constant polynomial `1` as unit.
+/// 3. **`basemul` is that product transported along the transform**:
+///    `Self::basemul(a.ntt(), b.ntt()) == a.ntt_mul(b).ntt()`, equivalently
+///    `Self::intt(Self::basemul(a.ntt(), b.ntt())) == a.ntt_mul(b)`. It is the
+///    multiplication of `polyN` that makes `ntt` a ring isomorphism. Whether
+///    that multiplication is entrywise in `Coeff` or blockwise over larger
+///    factors depends on how far the transform splits `X^n + 1`, and is stated
+///    by the instance, not here.
+/// 4. **`ntt_add` is the sum transported along the transform**:
+///    `Self::ntt_add(a.ntt(), b.ntt()) == a.poly_add(b).ntt()`. Equivalently
+///    `Self::intt(Self::ntt_add(w, v)) == Self::intt(w).poly_add(Self::intt(v))`.
+///    Together with 3 this says `ntt` is a ring homomorphism.
+/// 5. **`poly_add`, `poly_sub` and `poly_smul` are coefficient-wise**:
+///    `a.poly_add(b).coeff(i) == a_i.add(b_i)`, `a.poly_sub(b).coeff(i) ==
+///    a_i.sub(b_i)` and `a.poly_smul(c).coeff(i) == c.mul(a_i)`.
+/// 6. **`ZERO`, `coeff` and `with_coeff` present the coefficient vector**:
+///    `Self::ZERO.coeff(i) == Coeff::ZERO`, `a.with_coeff(i, c).coeff(i) == c`,
+///    `a.with_coeff(i, c).coeff(j) == a_j` for `j != i`, and two elements with
+///    equal coefficients are equal. `Self::ZERO` is the unit of `poly_add`.
+/// 7. **`ntt_coeff` presents the NTT-form vector** in the same way: entry `i`
+///    of `w` for `i < n`, with `Self::intt(w).ntt() == w` recovering the whole
+///    of it. The entries are elements of `Coeff` in both the complete and the
+///    incomplete case; what an entry *means* — an evaluation, or one
+///    coefficient of one of the `n/d` factors — is stated by the instance.
+///
+/// `crate::poly_laws` checks every one of these on pseudorandom inputs, for any
+/// implementor.
+///
+/// # What the trait leaves to the instance
+///
+/// **The evaluation ordering of `ntt`.** The laws above are invariant under
+/// permuting the entries of `polyN` and under changing which root of unity the
+/// transform uses, so they do not pin the transform down; a scheme that samples
+/// an element directly in NTT form (ML-DSA's `ExpandA`, FIPS 204 Algorithm 32;
+/// ML-KEM's `Â`, FIPS 203 Algorithm 13) observes the choice, so it cannot be
+/// left open. An instance states it:
+///
+/// * `mldsa_q`: `ŵ[i] = w(ζ^(2·BitRev8(i) + 1))` with `ζ = 1753`
+///   (FIPS 204 §7.5) — the transform is complete, and each entry is an
+///   evaluation at one of the 256 primitive 512th roots of unity.
+/// * `mlkem_q`: `ŵ[2i] + ŵ[2i+1]·X = w mod (X² − ζ^(2·BitRev7(i) + 1))` with
+///   `ζ = 17` (FIPS 203 §4.3) — the transform stops one layer early, and a pair
+///   of entries is the residue of `w` modulo one of the 128 quadratic factors.
+///
+/// **The shape of `basemul`**, for the same reason: 256 products in `Coeff` at
+/// `mldsa_q` (FIPS 204 Algorithm 45), 128 products of degree-1 polynomials
+/// modulo `X² − γ_i` at `mlkem_q` (FIPS 203 Algorithm 12).
 pub trait PolyRing: Copy + Clone + PartialEq {
     /// The coefficient field `Z_q`.
     type Coeff: Field;
@@ -71,6 +149,50 @@ pub trait PolyRing: Copy + Clone + PartialEq {
     fn ntt_mul(self, rhs: Self) -> Self;
 }
 
+/// Building an element of `polyN` entry by entry, without going through
+/// [`PolyRing::ntt`].
+///
+/// A scheme that samples a matrix directly in NTT form needs this: ML-DSA's
+/// `ExpandA` (FIPS 204 Algorithm 32) and ML-KEM's `Â` (FIPS 203 Algorithm 13)
+/// both fill the entries of `polyN` from a XOF and never apply the transform.
+/// It also makes the second half of law 1 of [`PolyRing`] — `intt` followed by
+/// `ntt` is the identity — statable on an arbitrary element of `polyN` rather
+/// than only on one in the image of `ntt`.
+///
+/// The contract, for `i, j < N` with `i != j`:
+///
+/// * `Self::ntt_coeff(Self::NTT_ZERO, i) == Coeff::ZERO` and
+///   `Self::NTT_ZERO == Self::ZERO.ntt()`;
+/// * `Self::ntt_coeff(Self::with_ntt_coeff(w, i, c), i) == c`;
+/// * `Self::ntt_coeff(Self::with_ntt_coeff(w, i, c), j) == Self::ntt_coeff(w, j)`;
+/// * every element of `NttForm` is reachable: filling all `N` entries of
+///   `NTT_ZERO` with the entries of `w` yields `w`.
+pub trait NttSample: PolyRing {
+    /// The zero of `polyN` — the transform of [`PolyRing::ZERO`].
+    const NTT_ZERO: Self::NttForm;
+
+    /// The element of `polyN` with entry `i` replaced by `c`, for `i < N`.
+    fn with_ntt_coeff(w: Self::NttForm, i: usize, c: Self::Coeff) -> Self::NttForm;
+}
+
+// The two `NttSample` constructors of the ML-DSA instance, whose NTT form is a
+// flat array of 256 entries. Like the instance itself, they are gated out of
+// the extraction.
+#[cfg(not(hax))]
+impl NttSample for crate::mldsa_q::PolyDsa {
+    const NTT_ZERO: crate::mldsa_q::NttDsa = crate::mldsa_q::NttDsa([0u32; 256]);
+
+    fn with_ntt_coeff(
+        w: crate::mldsa_q::NttDsa,
+        i: usize,
+        c: crate::mldsa_q::Fq,
+    ) -> crate::mldsa_q::NttDsa {
+        let mut v = w;
+        v.0[i] = c.0;
+        v
+    }
+}
+
 /// A generic caller of [`PolyRing::ntt_mul`], so that an extraction contains a
 /// call site for the ring product. Not `cfg`-gated: the extraction must see it.
 pub fn poly_mul_demo<R: PolyRing>(a: R, b: R) -> R {
@@ -96,6 +218,13 @@ pub fn ntt_dot2_demo<R: PolyRing>(
     R::ntt_add(R::basemul(a0, v0), R::basemul(a1, v1))
 }
 
+/// A generic caller of [`NttSample`]: the element of `polyN` whose entries are
+/// the entries of `w` with entry `i` replaced by `c`, built from
+/// [`NttSample::NTT_ZERO`] the way a sampler in NTT form builds one.
+pub fn ntt_sample_demo<R: NttSample>(w: R::NttForm, i: usize, c: R::Coeff) -> R::NttForm {
+    R::with_ntt_coeff(w, i, c)
+}
+
 /// The modulus of ML-DSA (FIPS 204 Table 1), `q = 2^23 − 2^13 + 1`, as a source
 /// constant on the extraction surface.
 pub const MODULUS_MLDSA: u32 = 8380417;
@@ -103,4 +232,13 @@ pub const MODULUS_MLDSA: u32 = 8380417;
 /// Keeps [`MODULUS_MLDSA`] on the extraction surface.
 pub fn modulus_mldsa() -> u32 {
     MODULUS_MLDSA
+}
+
+/// The modulus of ML-KEM (FIPS 203 §4), `q = 3329 = 13·2^8 + 1`, as a source
+/// constant on the extraction surface.
+pub const MODULUS_MLKEM: u32 = 3329;
+
+/// Keeps [`MODULUS_MLKEM`] on the extraction surface.
+pub fn modulus_mlkem() -> u32 {
+    MODULUS_MLKEM
 }

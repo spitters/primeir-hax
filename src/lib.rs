@@ -45,21 +45,27 @@
 //!
 //! Four trait families: Field / ModArith / EC here, and the polynomial-ring
 //! family [`poly::PolyRing`] (`ntt`, `intt`, `basemul`, `poly_add`, `poly_sub`,
-//! `poly_smul`, `ntt_mul`), which names the operations of the `polyDialect`
+//! `poly_smul`, `ntt_mul`) with its extension [`poly::NttSample`] (building an
+//! element in NTT form entry by entry, as a sampler in NTT form does), which
+//! names the operations of the `polyDialect`
 //! (`PolyOp`); plus the constant-time family [`ct::CtField`] and the
 //! square-root-of-a-ratio op [`sqrt::SqrtRatio`] (RFC 9380, Appendix F.2.1).
 //! Reference instances: `fp25519` for `Field`, `ModArith`, `EcGroup`,
 //! `CtField` and `SqrtRatio`; `fp256` (the NIST P-256 prime) for `Field`,
-//! `ModArith`, `CtField` and `SqrtRatio`; and `mldsa_q` (the ML-DSA modulus
-//! `q = 8380417` and `Z_q[X]/(X^256 + 1)`) for `Field`, `ModArith` and
-//! `PolyRing`.
+//! `ModArith`, `CtField` and `SqrtRatio`; `mldsa_q` (the ML-DSA modulus
+//! `q = 8380417` and `Z_q[X]/(X^256 + 1)`) for `Field`, `ModArith`,
+//! `PolyRing` and `NttSample`; and `mlkem_q` (the ML-KEM modulus `q = 3329`
+//! and the same ring, with the incomplete 7-layer transform of FIPS 203) for
+//! `Field`, `PolyRing` and `NttSample`. [`poly_laws`] holds the law suite of
+//! the lattice surface as generic checks, which both lattice instances pass.
 //!
 //! ## Features
 //!
 //! `bigint-instances` (default) carries `fp25519` and `fp256`, which are
 //! realised with `num-bigint`. Without it the crate is the trait surface plus
-//! `mldsa_q`, is `no_std` and has no dependency; that is how a `no_std` crate
-//! such as `mldsa-hax` implements the traits for its own types.
+//! the two lattice instances `mldsa_q` and `mlkem_q` and the law suite
+//! [`poly_laws`], is `no_std` and has no dependency; that is how a `no_std`
+//! crate such as `mldsa-hax` implements the traits for its own types.
 
 #![forbid(unsafe_code)]
 // Without the `bigint-instances` feature the crate is the trait surface plus
@@ -311,3 +317,13 @@ pub mod sqrt;
 // gated out of the extraction like `fp25519`.
 #[cfg(not(hax))]
 pub mod mldsa_q;
+
+// Its reference instance at the ML-KEM modulus, whose transform is incomplete:
+// an opaque arithmetic leaf, gated out of the extraction like `mldsa_q`.
+#[cfg(not(hax))]
+pub mod mlkem_q;
+
+// The law suite of the lattice surface, run against an instance. Test support
+// under rustc, gated out of the extraction.
+#[cfg(not(hax))]
+pub mod poly_laws;

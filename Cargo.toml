@@ -23,6 +23,10 @@ num-bigint = { version = "0.4", optional = true }
 # The FIPS 204 specification crate (validated against NIST ACVP vectors); the
 # `mldsa_q` instance is compared with its NTT, field arithmetic and zeta table.
 mldsa-hax = { path = "../mldsa-hax" }
+# The FIPS 203 specification crate (validated against the NIST ML-KEM-768 KAT
+# vectors); the `mlkem_q` instance is compared with its NTT, its inverse and
+# its base-case multiply.
+mlkem-hax = { path = "../mlkem-hax" }
 
 [lints.rust]
 # hax passes `--cfg hax`; keep rustc from warning on the gate.

@@ -4,7 +4,11 @@
 //! the operations (polynomial evaluation, the schoolbook negacyclic product).
 
 use primeir_hax::mldsa_q::*;
-use primeir_hax::poly::{mlwe_entry_demo, ntt_dot2_demo, poly_mul_demo, PolyRing, MODULUS_MLDSA};
+use primeir_hax::poly::{
+    mlwe_entry_demo, ntt_dot2_demo, ntt_sample_demo, poly_mul_demo, NttSample, PolyRing,
+    MODULUS_MLDSA,
+};
+use primeir_hax::poly_laws::check_all;
 use primeir_hax::{Field, ModArith};
 
 const Q: u32 = MODULUS_MLDSA;
@@ -132,6 +136,25 @@ fn ntt_mul_is_the_negacyclic_product() {
     let x255 = PolyDsa::ZERO.with_coeff(255, Fq::ONE);
     let x = PolyDsa::ZERO.with_coeff(1, Fq::ONE);
     assert_eq!(x255.ntt_mul(x), PolyDsa::ZERO.with_coeff(0, Fq(Q - 1)));
+}
+
+#[test]
+fn ntt_form_is_built_entry_by_entry() {
+    // What ExpandA (FIPS 204 Algorithm 32) does: fill the entries of an element
+    // of T_q directly, without applying the transform.
+    let w = lcg_poly(11);
+    let mut built = <PolyDsa as NttSample>::NTT_ZERO;
+    for i in 0..256 {
+        built = ntt_sample_demo::<PolyDsa>(built, i, PolyDsa::ntt_coeff(w.ntt(), i));
+    }
+    assert_eq!(built, w.ntt());
+    assert_eq!(PolyDsa::intt(built), w);
+    assert_eq!(<PolyDsa as NttSample>::NTT_ZERO, PolyDsa::ZERO.ntt());
+}
+
+#[test]
+fn the_law_suite_of_the_surface() {
+    check_all::<PolyDsa>("mldsa_q", 0x0204_0204, 3);
 }
 
 #[test]
