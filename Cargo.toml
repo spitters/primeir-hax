@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Prime-IR trait surface at the hax level — nominal Field/ModArith/EcGroup ops that map to the VIR prime-IR dialect (FieldOp/ModArithMont/ECOp); dual-use rustc + hax"
 license = "MIT"
+readme = "README.md"
 
 [features]
 default = ["bigint-instances"]
@@ -26,14 +27,16 @@ fixed-width-instances = []
 # surface extracts even though this dependency is not in hax's input subset.
 num-bigint = { version = "0.4", optional = true }
 
-[dev-dependencies]
-# The FIPS 204 specification crate (validated against NIST ACVP vectors); the
-# `mldsa_q` instance is compared with its NTT, field arithmetic and zeta table.
-mldsa-hax = { path = "../mldsa-hax" }
-# The FIPS 203 specification crate (validated against the NIST ML-KEM-768 KAT
-# vectors); the `mlkem_q` instance is compared with its NTT, its inverse and
-# its base-case multiply.
-mlkem-hax = { path = "../mlkem-hax" }
+# No dev-dependencies: the crate builds and tests standalone.
+#
+# The `mldsa_q` and `mlkem_q` reference instances are cross-checked against the
+# FIPS 204 and FIPS 203 specification crates, but those tests live in
+# `mldsa-hax/tests/primeir_reference_instance.rs` and
+# `mlkem-hax/tests/primeir_reference_instance.rs`, which is where both crates are
+# available. A cross-check here would be a dev-dependency cycle — `mldsa-hax`
+# depends on this crate — and Cargo resolves a path dependency whether or not the
+# feature enabling it is on, so feature-gating would not let this crate be
+# cloned on its own.
 
 [lints.rust]
 # hax passes `--cfg hax`; keep rustc from warning on the gate.
