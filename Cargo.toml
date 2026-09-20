@@ -27,16 +27,12 @@ fixed-width-instances = []
 # surface extracts even though this dependency is not in hax's input subset.
 num-bigint = { version = "0.4", optional = true }
 
-# No dev-dependencies: the crate builds and tests standalone.
+# No dev-dependencies: the crate builds and tests on its own.
 #
-# The `mldsa_q` and `mlkem_q` reference instances are cross-checked against the
-# FIPS 204 and FIPS 203 specification crates, but those tests live in
-# `mldsa-hax/tests/primeir_reference_instance.rs` and
-# `mlkem-hax/tests/primeir_reference_instance.rs`, which is where both crates are
-# available. A cross-check here would be a dev-dependency cycle — `mldsa-hax`
-# depends on this crate — and Cargo resolves a path dependency whether or not the
-# feature enabling it is on, so feature-gating would not let this crate be
-# cloned on its own.
+# The `mldsa_q` and `mlkem_q` reference instances are also cross-checked against
+# independent FIPS 204 and FIPS 203 implementations. Those tests live with the
+# implementations they compare against, since a crate that depends on this one
+# cannot be depended on from here.
 
 [lints.rust]
 # hax passes `--cfg hax`; keep rustc from warning on the gate.
