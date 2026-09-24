@@ -1,5 +1,5 @@
-//! Fixed-width instance of the prime field of NIST P-256 — an **opaque
-//! arithmetic leaf** with no allocation.
+//! Fixed-width instance of the prime field of NIST P-256, with no
+//! allocation.
 //!
 //! `Fp256Mont` is the field of order `p = 2^256 - 2^224 + 2^192 + 2^96 - 1`
 //! (FIPS 186-4; RFC 9380, Section 8.2), stored as four little-endian `u64`
@@ -67,9 +67,9 @@
 //! ## Rust subset
 //!
 //! Index `while` loops, no iterator chains, no trait objects, no allocation,
-//! `core` only. The module is gated out of the extraction
-//! (`#[cfg(not(hax))]` in `lib.rs`) as the other reference instances are,
-//! and is written in the subset so that gate can be lifted.
+//! `core` only: the subset hax extracts. Unlike the `num-bigint` reference
+//! instances, the module is not gated out of the extraction; with the
+//! `fixed-width-instances` feature it is on the extraction surface.
 
 use crate::ct::CtField;
 use crate::sqrt::{SqrtRatio, SQRT_RATIO_3MOD4_C2_P256};
