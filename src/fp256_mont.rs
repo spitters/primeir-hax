@@ -572,7 +572,7 @@ impl Field for Fp256Mont {
     /// OS2IP mod `p` of a little-endian byte string of any length: Horner's
     /// method over 32-byte chunks, most significant chunk first, with each
     /// chunk reduced by one conditional subtraction and the chunk weight
-    /// `2^256 mod p` supplied by [`Fp256Mont::TWO_POW_256`]. A 32-byte input
+    /// `2^256 mod p` (`Fp256Mont(R2_LIMBS)`, the value of [`Fp256Mont::TWO_POW_256`]). A 32-byte input
     /// costs no multiplication and the 48- and 64-byte inputs of
     /// `hash_to_field` cost one.
     fn from_bytes(bytes: &[u8]) -> Self {
@@ -593,7 +593,7 @@ impl Field for Fp256Mont {
                 i += 1;
             }
             let chunk = Self::from_canonical_bytes(&buf);
-            acc = acc.mul(Self::TWO_POW_256).add(chunk);
+            acc = acc.mul(Fp256Mont(R2_LIMBS)).add(chunk);
         }
         acc
     }
