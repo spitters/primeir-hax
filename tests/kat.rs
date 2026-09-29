@@ -13,7 +13,8 @@
 
 use num_bigint::BigUint;
 use primeir_hax::fp25519::{Edwards25519, Fp25519};
-use primeir_hax::{EcGroup, Field, ModArith, Scalar};
+use primeir_hax::laws;
+use primeir_hax::{EcGroup, Field, Scalar};
 
 /// `p = 2^255 - 19`, rebuilt independently in the test.
 fn p() -> BigUint {
@@ -43,30 +44,17 @@ fn samples() -> Vec<Fp25519> {
 #[test]
 fn field_identities() {
     for &a in &samples() {
-        // a * 1 = a
-        assert_eq!(a.mul(Fp25519::ONE), a, "a*ONE=a");
-        // a + 0 = a
-        assert_eq!(a.add(Fp25519::ZERO), a, "a+ZERO=a");
-        // a - a = 0
-        assert_eq!(a.sub(a), Fp25519::ZERO, "a-a=ZERO");
-        // a + (-a) = 0
-        assert_eq!(a.add(a.neg()), Fp25519::ZERO, "a+(-a)=ZERO");
-        // double = a + a
-        assert_eq!(a.double(), a.add(a), "double=a+a");
-        // square = a * a
-        assert_eq!(a.square(), a.mul(a), "square=a*a");
-        // a * inv(a) = 1  (a != 0)
-        if a != Fp25519::ZERO {
-            assert_eq!(a.mul(a.inv()), Fp25519::ONE, "a*inv(a)=ONE");
-        }
+        assert!(laws::mul_one_law(a), "a*ONE=a");
+        assert!(laws::add_zero_law(a), "a+ZERO=a");
+        assert!(laws::sub_self_law(a), "a-a=ZERO");
+        assert!(laws::add_neg_law(a), "a+(-a)=ZERO");
+        assert!(laws::double_law(a), "double=a+a");
+        assert!(laws::square_law(a), "square=a*a");
+        // a * inv(a) = 1 for a != 0; the law holds at ZERO.
+        assert!(laws::mul_inv_law(a), "a*inv(a)=ONE");
         for &b in &samples() {
             for &c in &samples() {
-                // distributivity: a*(b+c) = a*b + a*c
-                assert_eq!(
-                    a.mul(b.add(c)),
-                    a.mul(b).add(a.mul(c)),
-                    "distributivity"
-                );
+                assert!(laws::distrib_law(a, b, c), "distributivity");
             }
             // cross-check mul against num-bigint directly
             let expect = from_big(to_big(a) * to_big(b));
@@ -86,15 +74,9 @@ fn minus_one_squared_is_one() {
 #[test]
 fn montgomery_contract() {
     for &a in &samples() {
-        // from_mont(to_mont(a)) = a
-        assert_eq!(a.to_mont().from_mont(), a, "from_mont(to_mont a)=a");
+        assert!(laws::mont_roundtrip_law(a), "from_mont(to_mont a)=a");
         for &b in &samples() {
-            // mont_mul(to_mont a, to_mont b) = to_mont(a*b)
-            assert_eq!(
-                a.to_mont().mont_mul(b.to_mont()),
-                a.mul(b).to_mont(),
-                "mont_mul(â,b̂)=â·b̂"
-            );
+            assert!(laws::mont_mul_law(a, b), "mont_mul(â,b̂)=â·b̂");
         }
     }
 }
@@ -150,9 +132,7 @@ fn ec_group_law_rfc8032_order() {
     let b = Edwards25519::base_point();
     let id = Edwards25519::IDENTITY;
 
-    // identity laws
-    assert_eq!(b.point_add(id), b, "B + O = B");
-    assert_eq!(id.point_add(b), b, "O + B = B");
+    assert!(laws::point_add_identity_law(b), "B + O = B and O + B = B");
     // doubling agrees with scalar_mul(2)
     assert_eq!(
         b.point_double(),

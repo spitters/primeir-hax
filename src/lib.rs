@@ -56,14 +56,16 @@
 //! `PolyRing`; and `mlkem_q` (the ML-KEM modulus `q = 3329`
 //! and the same ring, with the incomplete 7-layer transform of FIPS 203) for
 //! `Field` and `PolyRing`. [`poly_laws`] holds the law suite of
-//! the lattice surface as generic checks, which both lattice instances pass.
+//! the lattice surface as generic checks, which both lattice instances pass,
+//! and [`laws`] states each algebraic law of the traits once, as a Boolean
+//! function that those checks assert and the extraction carries.
 //!
 //! ## Features
 //!
 //! `bigint-instances` (default) carries `fp25519` and `fp256`, which are
 //! realised with `num-bigint`. Without it the crate is the trait surface plus
 //! the two lattice instances `mldsa_q` and `mlkem_q` and the law suite
-//! [`poly_laws`], is `no_std` and has no dependency; that is how a `no_std`
+//! [`poly_laws`], is `no_std` and depends on `hax-lib` only; that is how a `no_std`
 //! crate implements the traits for its own types.
 
 #![forbid(unsafe_code)]
@@ -327,6 +329,11 @@ pub mod mldsa_q;
 // an opaque arithmetic leaf, gated out of the extraction like `mldsa_q`.
 #[cfg(not(hax))]
 pub mod mlkem_q;
+
+// The algebraic laws of the traits, one Boolean function per law, on the
+// extraction surface: the test suites assert them under rustc and the
+// extraction carries their definitions.
+pub mod laws;
 
 // The law suite of the lattice surface, run against an instance. Test support
 // under rustc, gated out of the extraction.

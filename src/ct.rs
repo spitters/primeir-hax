@@ -25,22 +25,40 @@ use crate::{Field, Scalar};
 
 /// A prime field of odd characteristic with the constant-time operations of
 /// RFC 9496, Sections 2.1 and 2.2. Truth values are `u64` values in `{0, 1}`.
+///
+/// The `ensures` clauses restate the documentation of each method in the
+/// clause language of the extraction, which names only the parameters and the
+/// result: the ones of `ct_select` and `ct_eq` are complete, the ones of
+/// `is_zero` and `is_negative` state only that the result is a truth value.
+/// Every `impl` restates them. The laws that name other operations
+/// (`is_zero = ct_eq(·, ZERO)`, CT_ABS) are in [`crate::laws`].
+#[hax_lib::attributes]
 pub trait CtField: Field {
     /// CT_SELECT (RFC 9496, Section 2.2): `then_v` if `cond = 1` and `else_v`
     /// if `cond = 0`. The result is unspecified for any other `cond`.
+    #[hax_lib::ensures(|result| if cond == 1 {
+        result == then_v
+    } else if cond == 0 {
+        result == else_v
+    } else {
+        true
+    })]
     fn ct_select(cond: u64, then_v: Self, else_v: Self) -> Self;
 
     /// CT_EQ (RFC 9496, Section 2.2): `1` if `self` and `rhs` are the same
     /// field element, `0` otherwise.
+    #[hax_lib::ensures(|result| if self == rhs { result == 1 } else { result == 0 })]
     fn ct_eq(self, rhs: Self) -> u64;
 
     /// `1` if `self` is the zero of the field, `0` otherwise. Equal to
     /// `self.ct_eq(Self::ZERO)`.
+    #[hax_lib::ensures(|result| result == 0 || result == 1)]
     fn is_zero(self) -> u64;
 
     /// IS_NEGATIVE (RFC 9496, Section 2.1): the parity of the representative of
     /// `self` in `[0, p)`, that is `1` if that integer is odd and `0` if it is
     /// even. It is `sgn0` of RFC 9380, Section 4.1 for extension degree `m = 1`.
+    #[hax_lib::ensures(|result| result == 0 || result == 1)]
     fn is_negative(self) -> u64;
 
     /// CT_ABS (RFC 9496, Section 2.2): `-self` if `self.is_negative() = 1`,
@@ -79,7 +97,15 @@ pub fn ct_eq_up_to_sign_demo<F: CtField>(a: F, b: F) -> u64 {
 // `if`, so it is not constant-time. Gated out of the extraction with the
 // instance it extends.
 #[cfg(all(not(hax), feature = "bigint-instances"))]
+#[hax_lib::attributes]
 impl CtField for crate::fp25519::Fp25519 {
+    #[hax_lib::ensures(|result| if cond == 1 {
+        result == then_v
+    } else if cond == 0 {
+        result == else_v
+    } else {
+        true
+    })]
     fn ct_select(cond: u64, then_v: Self, else_v: Self) -> Self {
         if cond == 1 {
             then_v
@@ -88,6 +114,7 @@ impl CtField for crate::fp25519::Fp25519 {
         }
     }
 
+    #[hax_lib::ensures(|result| if self == rhs { result == 1 } else { result == 0 })]
     fn ct_eq(self, rhs: Self) -> u64 {
         if self.0 == rhs.0 {
             1
@@ -96,10 +123,12 @@ impl CtField for crate::fp25519::Fp25519 {
         }
     }
 
+    #[hax_lib::ensures(|result| result == 0 || result == 1)]
     fn is_zero(self) -> u64 {
         self.ct_eq(Self::ZERO)
     }
 
+    #[hax_lib::ensures(|result| result == 0 || result == 1)]
     fn is_negative(self) -> u64 {
         (self.0[0] & 1) as u64
     }

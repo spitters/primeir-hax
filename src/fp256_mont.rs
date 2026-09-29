@@ -625,7 +625,15 @@ impl ModArith for Fp256Mont {
     }
 }
 
+#[hax_lib::attributes]
 impl CtField for Fp256Mont {
+    #[hax_lib::ensures(|result| if cond == 1 {
+        result == then_v
+    } else if cond == 0 {
+        result == else_v
+    } else {
+        true
+    })]
     fn ct_select(cond: u64, then_v: Self, else_v: Self) -> Self {
         Fp256Mont(select_limbs(mask_of(cond), then_v.0, else_v.0))
     }
@@ -633,6 +641,7 @@ impl CtField for Fp256Mont {
     /// The or of the limb differences is zero exactly when the two canonical
     /// representatives agree; `x | (-x)` has its top bit set for every
     /// non-zero `x`.
+    #[hax_lib::ensures(|result| if self == rhs { result == 1 } else { result == 0 })]
     fn ct_eq(self, rhs: Self) -> u64 {
         let mut diff: u64 = 0;
         let mut i = 0;
@@ -643,12 +652,14 @@ impl CtField for Fp256Mont {
         1 - ((diff | diff.wrapping_neg()) >> 63)
     }
 
+    #[hax_lib::ensures(|result| result == 0 || result == 1)]
     fn is_zero(self) -> u64 {
         self.ct_eq(Self::ZERO)
     }
 
     /// The parity of the representative in `[0, p)`, which is the parity of
     /// the low limb outside the Montgomery domain.
+    #[hax_lib::ensures(|result| result == 0 || result == 1)]
     fn is_negative(self) -> u64 {
         self.to_canonical_limbs()[0] & 1
     }
@@ -694,6 +705,7 @@ impl SqrtRatio for Fp256Mont {
 mod tests {
     use super::*;
     use crate::fp256::Fp256;
+    use crate::laws;
     use crate::sqrt::SQRT_RATIO_3MOD4_C1_P256;
 
     /// A deterministic SplitMix64 stream, so the randomized cases are the
@@ -871,7 +883,7 @@ mod tests {
     fn montgomery_round_trip_is_the_identity() {
         for b in sample_inputs(256) {
             let x = fast(&b);
-            assert_eq!(x.to_mont().from_mont(), x, "from_mont ∘ to_mont");
+            assert!(laws::mont_roundtrip_law(x), "from_mont ∘ to_mont");
             assert_eq!(x.from_mont().to_mont(), x, "to_mont ∘ from_mont");
         }
     }
@@ -894,7 +906,7 @@ mod tests {
         for a in &inputs {
             for b in &inputs {
                 let (x, y) = (fast(a), fast(b));
-                assert_eq!(x.to_mont().mont_mul(y.to_mont()), x.mul(y).to_mont());
+                assert!(laws::mont_mul_law(x, y));
             }
         }
     }
@@ -989,7 +1001,7 @@ mod tests {
         for a in &inputs {
             let (xa, ya) = (Fp256Mont(*a), slow_of_representative(*a));
             agree("square at an edge representative", xa.square(), ya.square());
-            assert_eq!(xa.square(), xa.mul(xa), "square against mul at {a:?}");
+            assert!(laws::square_law(xa), "square against mul at {a:?}");
             for b in &inputs {
                 let (xb, yb) = (Fp256Mont(*b), slow_of_representative(*b));
                 agree("mul at an edge representative", xa.mul(xb), ya.mul(yb));
@@ -1006,11 +1018,11 @@ mod tests {
     fn squaring_agrees_with_multiplying_by_itself() {
         for b in sample_inputs(512) {
             let x = fast(&b);
-            assert_eq!(x.square(), x.mul(x), "square against mul");
+            assert!(laws::square_law(x), "square against mul");
         }
         for v in representative_sample(256) {
             let x = Fp256Mont(v);
-            assert_eq!(x.square(), x.mul(x), "square against mul at {v:?}");
+            assert!(laws::square_law(x), "square against mul at {v:?}");
         }
     }
 
@@ -1079,7 +1091,7 @@ mod tests {
             if x == Fp256Mont::ZERO {
                 assert_eq!(x.inv(), Fp256Mont::ZERO);
             } else {
-                assert_eq!(x.mul(x.inv()), Fp256Mont::ONE);
+                assert!(laws::mul_inv_law(x));
             }
         }
     }
@@ -1225,20 +1237,13 @@ mod tests {
     #[test]
     fn sqrt_ratio_returns_a_root() {
         let inputs = sample_inputs(16);
-        let z = <Fp256Mont as SqrtRatio>::Z;
         for a in &inputs {
             for b in &inputs {
                 let (u, v) = (fast(a), fast(b));
                 if v == Fp256Mont::ZERO {
                     continue;
                 }
-                let (is_qr, y) = Fp256Mont::sqrt_ratio(u, v);
-                let lhs = y.square().mul(v);
-                if is_qr == 1 {
-                    assert_eq!(lhs, u, "y^2·v = u");
-                } else {
-                    assert_eq!(lhs, z.mul(u), "y^2·v = Z·u");
-                }
+                assert!(laws::sqrt_ratio_law(u, v), "y^2·v = u or y^2·v = Z·u");
             }
         }
     }

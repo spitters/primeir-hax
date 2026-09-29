@@ -138,7 +138,15 @@ impl ModArith for Fp256 {
 
 // The constant-time op family on the canonical 32-byte representative:
 // comparison with `==`, selection with `if`; not constant-time (see `ct.rs`).
+#[hax_lib::attributes]
 impl CtField for Fp256 {
+    #[hax_lib::ensures(|result| if cond == 1 {
+        result == then_v
+    } else if cond == 0 {
+        result == else_v
+    } else {
+        true
+    })]
     fn ct_select(cond: u64, then_v: Self, else_v: Self) -> Self {
         if cond == 1 {
             then_v
@@ -147,6 +155,7 @@ impl CtField for Fp256 {
         }
     }
 
+    #[hax_lib::ensures(|result| if self == rhs { result == 1 } else { result == 0 })]
     fn ct_eq(self, rhs: Self) -> u64 {
         if self.0 == rhs.0 {
             1
@@ -155,10 +164,12 @@ impl CtField for Fp256 {
         }
     }
 
+    #[hax_lib::ensures(|result| result == 0 || result == 1)]
     fn is_zero(self) -> u64 {
         self.ct_eq(Self::ZERO)
     }
 
+    #[hax_lib::ensures(|result| result == 0 || result == 1)]
     fn is_negative(self) -> u64 {
         (self.0[0] & 1) as u64
     }

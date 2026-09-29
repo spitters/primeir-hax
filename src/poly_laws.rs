@@ -1,9 +1,12 @@
 //! The law suite of [`PolyRing`], as generic checks.
 //!
 //! Every law stated in the contract of [`PolyRing`] is checked here on
-//! pseudorandom inputs, for an arbitrary implementor. The entry point is
-//! [`check_poly_ring`]. A lattice specification crate that implements the trait
-//! for its own types runs the same suite against its instance:
+//! pseudorandom inputs, for an arbitrary implementor. Each law is stated once,
+//! as a Boolean function in [`crate::laws`] that the extraction also carries;
+//! the checks here draw the inputs, supply the quantifier over indices and
+//! assert the law. The entry point is [`check_poly_ring`]. A lattice
+//! specification crate that implements the trait for its own types runs the
+//! same suite against its instance:
 //!
 //! ```ignore
 //! primeir_hax::poly_laws::check_poly_ring::<MyPoly>("my_poly", 0xA5A5, 3);
@@ -17,18 +20,16 @@
 //! The module is `core`-only and gated out of the hax extraction: it is test
 //! support that runs under rustc, not part of the surface an extraction sees.
 
+use crate::laws;
 use crate::poly::{
     mlwe_entry_demo, ntt_dot2_demo, ntt_residual_demo, ntt_sample_demo, poly_mul_demo, PolyRing,
 };
 use crate::Field;
 
-fn zero<F: Field>() -> F {
-    F::ZERO
-}
-
-fn one<F: Field>() -> F {
-    F::ONE
-}
+/// The negacyclic product computed from the definition; stated with the laws
+/// in [`crate::laws`] and re-exported here for the suites that compare an
+/// instance against it.
+pub use crate::laws::schoolbook_negacyclic;
 
 /// The linear congruential generator of the pseudorandom inputs (the constants
 /// of Knuth's MMIX), driving [`Field::from_bytes`] to produce coefficients.
@@ -81,58 +82,33 @@ impl Lcg {
     }
 }
 
-/// The negacyclic product of `Z_q[X]/(X^n + 1)` computed coefficient by
-/// coefficient from the definition,
-/// `(a·b)_k = Σ_{i+j=k} a_i·b_j − Σ_{i+j=k+n} a_i·b_j`.
-/// The reference [`PolyRing::ntt_mul`] is checked against.
-pub fn schoolbook_negacyclic<R: PolyRing>(a: R, b: R) -> R {
-    let mut out = R::ZERO;
-    for k in 0..R::N {
-        let mut acc = zero::<R::Coeff>();
-        for i in 0..=k {
-            acc = acc.add(a.coeff(i).mul(b.coeff(k - i)));
-        }
-        for i in (k + 1)..R::N {
-            acc = acc.sub(a.coeff(i).mul(b.coeff(k + R::N - i)));
-        }
-        out = out.with_coeff(k, acc);
-    }
-    out
-}
-
-/// The constant polynomial `c`.
-fn constant<R: PolyRing>(c: R::Coeff) -> R {
-    R::ZERO.with_coeff(0, c)
-}
-
 /// Law 6: `ZERO`, `coeff` and `with_coeff` present the coefficient vector.
 pub fn check_coefficient_access<R: PolyRing>(rng: &mut Lcg, label: &str) {
     let a: R = rng.poly();
     for i in 0..R::N {
         assert!(
-            R::ZERO.coeff(i) == zero::<R::Coeff>(),
+            laws::zero_coeff_law::<R>(i),
             "{label}: ZERO has a nonzero coefficient at {i}"
         );
     }
     let c = rng.coeff::<R::Coeff>();
     let i = rng.index(R::N);
-    let b = a.with_coeff(i, c);
-    assert!(b.coeff(i) == c, "{label}: with_coeff did not set coefficient {i}");
-    for j in 0..R::N {
-        if j != i {
-            assert!(
-                b.coeff(j) == a.coeff(j),
-                "{label}: with_coeff at {i} changed coefficient {j}"
-            );
-        }
-    }
-    let mut rebuilt = R::ZERO;
-    for j in 0..R::N {
-        rebuilt = rebuilt.with_coeff(j, a.coeff(j));
-    }
-    assert!(rebuilt == a, "{label}: an element is not determined by its coefficients");
     assert!(
-        a.poly_add(R::ZERO) == a,
+        laws::with_coeff_same_law(a, i, c),
+        "{label}: with_coeff did not set coefficient {i}"
+    );
+    for j in 0..R::N {
+        assert!(
+            laws::with_coeff_other_law(a, i, c, j),
+            "{label}: with_coeff at {i} changed coefficient {j}"
+        );
+    }
+    assert!(
+        laws::coeff_ext_law(a),
+        "{label}: an element is not determined by its coefficients"
+    );
+    assert!(
+        laws::poly_add_zero_law(a),
         "{label}: ZERO is not the unit of poly_add"
     );
 }
@@ -142,53 +118,50 @@ pub fn check_coefficient_access<R: PolyRing>(rng: &mut Lcg, label: &str) {
 /// arbitrary element of `polyN` is [`check_transform_bijection`].
 pub fn check_transform_roundtrip<R: PolyRing>(rng: &mut Lcg, label: &str) {
     let a: R = rng.poly();
-    assert!(R::intt(a.ntt()) == a, "{label}: intt ∘ ntt is not the identity");
+    assert!(laws::intt_ntt_law(a), "{label}: intt ∘ ntt is not the identity");
     assert!(
-        R::intt(a.ntt()).ntt() == a.ntt(),
+        laws::ntt_intt_law::<R>(a.ntt()),
         "{label}: ntt ∘ intt is not the identity on the image of ntt"
     );
-    assert!(R::intt(R::ZERO.ntt()) == R::ZERO, "{label}: the transform moves ZERO");
+    assert!(laws::intt_ntt_law(R::ZERO), "{label}: the transform moves ZERO");
 }
 
 /// Law 1 on an arbitrary element of `polyN`, plus law 8 — the construction of
 /// an element of `polyN` entry by entry.
 pub fn check_transform_bijection<R: PolyRing>(rng: &mut Lcg, label: &str) {
     assert!(
-        R::NTT_ZERO == R::ZERO.ntt(),
+        laws::ntt_zero_law::<R>(),
         "{label}: NTT_ZERO is not the transform of ZERO"
     );
     for i in 0..R::N {
         assert!(
-            R::ntt_coeff(R::NTT_ZERO, i) == zero::<R::Coeff>(),
+            laws::ntt_zero_coeff_law::<R>(i),
             "{label}: NTT_ZERO has a nonzero entry at {i}"
         );
     }
     let w = rng.ntt_form::<R>();
     assert!(
-        R::intt(w).ntt() == w,
+        laws::ntt_intt_law::<R>(w),
         "{label}: ntt ∘ intt is not the identity on polyN"
     );
     let c = rng.coeff::<R::Coeff>();
     let i = rng.index(R::N);
-    let v = ntt_sample_demo::<R>(w, i, c);
     assert!(
-        R::ntt_coeff(v, i) == c,
+        ntt_sample_demo::<R>(w, i, c) == R::with_ntt_coeff(w, i, c),
+        "{label}: ntt_sample_demo is not with_ntt_coeff"
+    );
+    assert!(
+        laws::with_ntt_coeff_same_law::<R>(w, i, c),
         "{label}: with_ntt_coeff did not set entry {i}"
     );
     for j in 0..R::N {
-        if j != i {
-            assert!(
-                R::ntt_coeff(v, j) == R::ntt_coeff(w, j),
-                "{label}: with_ntt_coeff at {i} changed entry {j}"
-            );
-        }
-    }
-    let mut rebuilt = R::NTT_ZERO;
-    for j in 0..R::N {
-        rebuilt = R::with_ntt_coeff(rebuilt, j, R::ntt_coeff(w, j));
+        assert!(
+            laws::with_ntt_coeff_other_law::<R>(w, i, c, j),
+            "{label}: with_ntt_coeff at {i} changed entry {j}"
+        );
     }
     assert!(
-        rebuilt == w,
+        laws::ntt_ext_law::<R>(w),
         "{label}: an element of polyN is not determined by its N entries"
     );
 }
@@ -198,29 +171,26 @@ pub fn check_coefficient_wise_ops<R: PolyRing>(rng: &mut Lcg, label: &str) {
     let a: R = rng.poly();
     let b: R = rng.poly();
     let c = rng.coeff::<R::Coeff>();
-    let sum = a.poly_add(b);
-    let diff = a.poly_sub(b);
-    let scaled = a.poly_smul(c);
     for i in 0..R::N {
         assert!(
-            sum.coeff(i) == a.coeff(i).add(b.coeff(i)),
+            laws::poly_add_coeff_law(a, b, i),
             "{label}: poly_add is not coefficient-wise at {i}"
         );
         assert!(
-            diff.coeff(i) == a.coeff(i).sub(b.coeff(i)),
+            laws::poly_sub_coeff_law(a, b, i),
             "{label}: poly_sub is not coefficient-wise at {i}"
         );
         assert!(
-            scaled.coeff(i) == c.mul(a.coeff(i)),
+            laws::poly_smul_coeff_law(a, c, i),
             "{label}: poly_smul is not coefficient-wise at {i}"
         );
     }
     assert!(
-        a.poly_sub(a) == R::ZERO,
+        laws::poly_sub_self_law(a),
         "{label}: poly_sub of an element with itself is not ZERO"
     );
     assert!(
-        a.poly_smul(one::<R::Coeff>()) == a,
+        laws::poly_smul_one_law(a),
         "{label}: poly_smul by ONE is not the identity"
     );
 }
@@ -230,17 +200,16 @@ pub fn check_ntt_add<R: PolyRing>(rng: &mut Lcg, label: &str) {
     let a: R = rng.poly();
     let b: R = rng.poly();
     assert!(
-        R::ntt_add(a.ntt(), b.ntt()) == a.poly_add(b).ntt(),
+        laws::ntt_add_law(a, b),
         "{label}: ntt_add is not the sum transported along the transform"
     );
     assert!(
-        R::intt(R::ntt_add(a.ntt(), b.ntt())) == a.poly_add(b),
+        laws::intt_ntt_add_law(a, b),
         "{label}: intt of ntt_add is not the sum"
     );
     for i in 0..R::N {
         assert!(
-            R::ntt_coeff(R::ntt_add(a.ntt(), b.ntt()), i)
-                == R::ntt_coeff(a.ntt(), i).add(R::ntt_coeff(b.ntt(), i)),
+            laws::ntt_add_entry_law::<R>(a.ntt(), b.ntt(), i),
             "{label}: ntt_add is not entry-wise at {i}"
         );
     }
@@ -252,26 +221,25 @@ pub fn check_ntt_sub<R: PolyRing>(rng: &mut Lcg, label: &str) {
     let a: R = rng.poly();
     let b: R = rng.poly();
     assert!(
-        R::ntt_sub(a.ntt(), b.ntt()) == a.poly_sub(b).ntt(),
+        laws::ntt_sub_law(a, b),
         "{label}: ntt_sub is not the difference transported along the transform"
     );
     assert!(
-        R::intt(R::ntt_sub(a.ntt(), b.ntt())) == a.poly_sub(b),
+        laws::intt_ntt_sub_law(a, b),
         "{label}: intt of ntt_sub is not the difference"
     );
     for i in 0..R::N {
         assert!(
-            R::ntt_coeff(R::ntt_sub(a.ntt(), b.ntt()), i)
-                == R::ntt_coeff(a.ntt(), i).sub(R::ntt_coeff(b.ntt(), i)),
+            laws::ntt_sub_entry_law::<R>(a.ntt(), b.ntt(), i),
             "{label}: ntt_sub is not entry-wise at {i}"
         );
     }
     assert!(
-        R::ntt_sub(a.ntt(), a.ntt()) == R::ZERO.ntt(),
+        laws::ntt_sub_self_law::<R>(a.ntt()),
         "{label}: ntt_sub of an element with itself is not the transform of ZERO"
     );
     assert!(
-        R::ntt_add(R::ntt_sub(a.ntt(), b.ntt()), b.ntt()) == a.ntt(),
+        laws::ntt_sub_add_law::<R>(a.ntt(), b.ntt()),
         "{label}: ntt_sub is not the inverse of ntt_add"
     );
 }
@@ -281,19 +249,19 @@ pub fn check_basemul<R: PolyRing>(rng: &mut Lcg, label: &str) {
     let a: R = rng.poly();
     let b: R = rng.poly();
     assert!(
-        R::basemul(a.ntt(), b.ntt()) == a.ntt_mul(b).ntt(),
+        laws::basemul_law(a, b),
         "{label}: basemul is not the product transported along the transform"
     );
     assert!(
-        R::intt(R::basemul(a.ntt(), b.ntt())) == a.ntt_mul(b),
+        laws::intt_basemul_law(a, b),
         "{label}: intt of basemul is not the ring product"
     );
     assert!(
-        R::basemul(a.ntt(), b.ntt()) == R::basemul(b.ntt(), a.ntt()),
+        laws::basemul_comm_law::<R>(a.ntt(), b.ntt()),
         "{label}: basemul is not commutative"
     );
     assert!(
-        R::basemul(a.ntt(), R::ZERO.ntt()) == R::ZERO.ntt(),
+        laws::basemul_zero_law::<R>(a.ntt()),
         "{label}: basemul by the transform of ZERO is not the transform of ZERO"
     );
 }
@@ -304,25 +272,23 @@ pub fn check_ntt_mul_is_negacyclic<R: PolyRing>(rng: &mut Lcg, label: &str) {
     let a: R = rng.poly();
     let b: R = rng.poly();
     assert!(
-        a.ntt_mul(b) == schoolbook_negacyclic(a, b),
+        laws::ntt_mul_negacyclic_law(a, b),
         "{label}: ntt_mul is not the schoolbook negacyclic product"
     );
     assert!(
-        a.ntt_mul(b) == b.ntt_mul(a),
+        laws::ntt_mul_comm_law(a, b),
         "{label}: ntt_mul is not commutative"
     );
-    let unit: R = constant::<R>(one::<R::Coeff>());
-    assert!(a.ntt_mul(unit) == a, "{label}: the constant 1 is not the unit of ntt_mul");
     assert!(
-        a.ntt_mul(R::ZERO) == R::ZERO,
+        laws::ntt_mul_one_law(a),
+        "{label}: the constant 1 is not the unit of ntt_mul"
+    );
+    assert!(
+        laws::ntt_mul_zero_law(a),
         "{label}: ZERO is not absorbing for ntt_mul"
     );
-    // X^(n−1) · X = X^n = −1.
-    let x_top = R::ZERO.with_coeff(R::N - 1, one::<R::Coeff>());
-    let x = R::ZERO.with_coeff(1, one::<R::Coeff>());
-    let minus_one: R = constant::<R>(zero::<R::Coeff>().sub(one::<R::Coeff>()));
     assert!(
-        x_top.ntt_mul(x) == minus_one,
+        laws::negacyclic_wrap_law::<R>(),
         "{label}: X^(n−1)·X is not −1, so the quotient is not by X^n + 1"
     );
 }
@@ -333,16 +299,16 @@ pub fn check_ring_axioms<R: PolyRing>(rng: &mut Lcg, label: &str) {
     let b: R = rng.poly();
     let c: R = rng.poly();
     assert!(
-        a.ntt_mul(b).ntt_mul(c) == a.ntt_mul(b.ntt_mul(c)),
+        laws::ntt_mul_assoc_law(a, b, c),
         "{label}: ntt_mul is not associative"
     );
     assert!(
-        a.ntt_mul(b.poly_add(c)) == a.ntt_mul(b).poly_add(a.ntt_mul(c)),
+        laws::ntt_mul_distrib_law(a, b, c),
         "{label}: ntt_mul does not distribute over poly_add"
     );
     let s = rng.coeff::<R::Coeff>();
     assert!(
-        a.ntt_mul(b.poly_smul(s)) == a.ntt_mul(b).poly_smul(s),
+        laws::ntt_mul_smul_law(a, b, s),
         "{label}: ntt_mul is not Coeff-bilinear"
     );
 }

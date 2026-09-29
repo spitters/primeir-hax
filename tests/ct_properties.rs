@@ -7,6 +7,7 @@
 
 use primeir_hax::ct::{ct_abs_demo, ct_eq_up_to_sign_demo, CtField};
 use primeir_hax::fp25519::Fp25519;
+use primeir_hax::laws;
 use primeir_hax::{Field, Scalar};
 
 fn hex32(s: &str) -> [u8; 32] {
@@ -68,10 +69,9 @@ fn select_and_eq() {
     for n in 0..50u64 {
         let a = Fp25519::from_u64(n.wrapping_mul(0x9E37_79B9_7F4A_7C15));
         let b = Fp25519::from_u64(n.wrapping_mul(0xBF58_476D_1CE4_E5B9) ^ 1);
-        assert_eq!(Fp25519::ct_select(1, a, b), a);
-        assert_eq!(Fp25519::ct_select(0, a, b), b);
-        assert_eq!(a.ct_eq(a), 1);
-        assert_eq!(a.ct_eq(b) == 1, a == b);
+        assert!(laws::ct_select_law(a, b), "ct_select");
+        assert!(laws::ct_eq_law(a, a), "ct_eq at equal arguments");
+        assert!(laws::ct_eq_law(a, b), "ct_eq");
         assert_eq!(a.sub(b).is_zero(), a.ct_eq(b));
         // Exactly one of a, -a is negative unless a = 0.
         assert_eq!(a.is_negative() + a.neg().is_negative() + a.is_zero(), 1);
