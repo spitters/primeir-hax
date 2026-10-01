@@ -222,6 +222,61 @@ pub fn field_demo<F: Field>(x: F, y: F) -> F {
     x.mul(y).add(x)
 }
 
+// --- Per-operation generic callers ------------------------------------------
+//
+// One generic function per `Field` operation, each a single trait-method call,
+// plus two compositions. They are source programs for the field route of the
+// compiler: each is a call site of an operation at a type parameter, so the
+// extraction carries the operation by trait and method name and an instance
+// supplies the arithmetic. Not `#[cfg]`-gated: the extraction must see them.
+
+/// Field addition `a + b` ([`Field::add`]).
+pub fn fe_add<F: Field>(a: F, b: F) -> F {
+    a.add(b)
+}
+
+/// Field subtraction `a − b` ([`Field::sub`]).
+pub fn fe_sub<F: Field>(a: F, b: F) -> F {
+    a.sub(b)
+}
+
+/// Field negation `−a` ([`Field::neg`]).
+pub fn fe_neg<F: Field>(a: F) -> F {
+    a.neg()
+}
+
+/// Field multiplication `a·b` ([`Field::mul`]).
+pub fn fe_mul<F: Field>(a: F, b: F) -> F {
+    a.mul(b)
+}
+
+/// Squaring `a·a` ([`Field::square`]).
+pub fn fe_sq<F: Field>(a: F) -> F {
+    a.square()
+}
+
+/// Doubling `a + a` ([`Field::double`]).
+pub fn fe_double<F: Field>(a: F) -> F {
+    a.double()
+}
+
+/// Multiplicative inverse `a⁻¹` ([`Field::inv`]); `fe_inv(ZERO)` is
+/// unspecified, as for the trait method.
+pub fn fe_inv<F: Field>(a: F) -> F {
+    a.inv()
+}
+
+/// The composition `a·b + c`: a multiplication whose result feeds an addition.
+pub fn fe_mul_add<F: Field>(a: F, b: F, c: F) -> F {
+    a.mul(b).add(c)
+}
+
+/// Division `a·b⁻¹` for `b ≠ 0`: an inversion whose result feeds a
+/// multiplication.
+pub fn fe_div<F: Field>(a: F, b: F) -> F {
+    a.mul(b.inv())
+}
+
 /// A generic caller exercising [`ModArith::mont_mul`] **nominally**, so
 /// `haxpipeT` emits a call site for the Montgomery multiply. Not `#[cfg]`-gated:
 /// the extraction must see it. The body is a single trait-op call, so the op
@@ -339,3 +394,90 @@ pub mod laws;
 // under rustc, gated out of the extraction.
 #[cfg(not(hax))]
 pub mod poly_laws;
+
+// The per-operation callers against an integer reference: at the ML-DSA
+// modulus over `u64` residues, and at `2^255 - 19` on operands small enough
+// that the exact integer result is below the modulus.
+#[cfg(all(test, not(hax)))]
+mod caller_tests {
+    use super::*;
+    use crate::mldsa_q::Fq;
+
+    const Q: u64 = poly::MODULUS_MLDSA as u64;
+
+    /// Pseudorandom residues modulo `Q`, with `0`, `1` and `Q - 1`.
+    fn samples() -> [u64; 35] {
+        let mut out = [0u64; 35];
+        out[1] = 1;
+        out[2] = Q - 1;
+        let mut s: u64 = 0x9E37_79B9_7F4A_7C15;
+        for x in out.iter_mut().skip(3) {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            *x = s % Q;
+        }
+        out
+    }
+
+    fn pow_mod(mut b: u64, mut e: u64) -> u64 {
+        let mut acc = 1u64;
+        b %= Q;
+        while e > 0 {
+            if e & 1 == 1 {
+                acc = acc * b % Q;
+            }
+            b = b * b % Q;
+            e >>= 1;
+        }
+        acc
+    }
+
+    #[test]
+    fn callers_match_integer_reference_mldsa_q() {
+        let xs = samples();
+        for &a in &xs {
+            let fa = Fq::new(a);
+            assert_eq!(fe_neg(fa), Fq::new((Q - a) % Q));
+            assert_eq!(fe_sq(fa), Fq::new(a * a));
+            assert_eq!(fe_double(fa), Fq::new(2 * a));
+            if a != 0 {
+                let ia = fe_inv(fa);
+                assert_eq!(ia, Fq::new(pow_mod(a, Q - 2)));
+                assert_eq!(fe_mul(fa, ia), Fq::ONE);
+            }
+            for &b in &xs {
+                let fb = Fq::new(b);
+                assert_eq!(fe_add(fa, fb), Fq::new(a + b));
+                assert_eq!(fe_sub(fa, fb), Fq::new(a + Q - b));
+                assert_eq!(fe_mul(fa, fb), Fq::new(a * b));
+                if b != 0 {
+                    assert_eq!(fe_div(fa, fb), Fq::new(a * pow_mod(b, Q - 2)));
+                }
+                for &c in xs.iter().take(8) {
+                    let fc = Fq::new(c);
+                    assert_eq!(fe_mul_add(fa, fb, fc), Fq::new(a * b % Q + c));
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "bigint-instances")]
+    #[test]
+    fn callers_match_integer_reference_fp25519() {
+        use crate::fp25519::Fp25519;
+        let e = Fp25519::from_u64;
+        let (a, b, c) = (0xDEAD_BEEFu64, 0x1234_5678u64, 0xCAFEu64);
+        assert_eq!(fe_add(e(a), e(b)), e(a + b));
+        assert_eq!(fe_sub(e(a), e(b)), e(a - b));
+        assert_eq!(fe_add(fe_neg(e(a)), e(a)), Fp25519::ZERO);
+        assert_eq!(fe_mul(e(a), e(b)), e(a * b));
+        assert_eq!(fe_sq(e(b)), e(b * b));
+        assert_eq!(fe_double(e(a)), e(2 * a));
+        assert_eq!(fe_mul(fe_inv(e(a)), e(a)), Fp25519::ONE);
+        assert_eq!(fe_mul_add(e(a), e(b), e(c)), e(a * b + c));
+        assert_eq!(fe_div(e(a * b), e(b)), e(a));
+        // `field_demo` is `fe_mul_add` with `c = x`.
+        assert_eq!(field_demo(e(a), e(b)), fe_mul_add(e(a), e(b), e(a)));
+    }
+}
