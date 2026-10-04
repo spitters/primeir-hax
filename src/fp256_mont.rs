@@ -67,9 +67,10 @@
 //! ## Rust subset
 //!
 //! Index `while` loops, no iterator chains, no trait objects, no allocation,
-//! `core` only: the subset hax extracts. Unlike the `num-bigint` reference
-//! instances, the module is not gated out of the extraction; with the
-//! `fixed-width-instances` feature it is on the extraction surface.
+//! `core` only: the subset hax extracts. The module is not part of the
+//! compiler's input: an extraction carries it only with the
+//! `fieldmodel-witness` feature, for the export behind the `FieldModel`
+//! witness. Under rustc the `fixed-width-instances` feature enables it.
 
 use crate::ct::CtField;
 use crate::sqrt::{SqrtRatio, SQRT_RATIO_3MOD4_C2_P256};
@@ -482,6 +483,8 @@ impl Field for Fp256Mont {
     const ZERO: Self = Fp256Mont([0, 0, 0, 0]);
     /// `R`, the Montgomery representation of `1`.
     const ONE: Self = Fp256Mont(R_LIMBS);
+    const MODULUS_LE: &'static [u64] = &P_LIMBS;
+    const BYTES: usize = 32;
 
     fn add(self, rhs: Self) -> Self {
         Fp256Mont(add_mod(self.0, rhs.0))
@@ -599,9 +602,14 @@ impl Field for Fp256Mont {
     }
 
     /// The little-endian encoding of the canonical representative: out of the
-    /// Montgomery domain, then out to bytes.
-    fn to_bytes(self) -> [u8; 32] {
-        limbs_to_bytes_le(self.to_canonical_limbs())
+    /// Montgomery domain, then out to bytes, into `out[0..32]`.
+    fn write_bytes(self, out: &mut [u8]) {
+        let b = limbs_to_bytes_le(self.to_canonical_limbs());
+        let mut i = 0;
+        while i < 32 {
+            out[i] = b[i];
+            i += 1;
+        }
     }
 }
 
@@ -707,6 +715,11 @@ mod tests {
     use crate::fp256::Fp256;
     use crate::laws;
     use crate::sqrt::SQRT_RATIO_3MOD4_C1_P256;
+
+    /// The 32-byte canonical encoding.
+    fn tb<F: Field>(a: F) -> [u8; 32] {
+        crate::to_byte_array::<F, 32>(a)
+    }
 
     /// A deterministic SplitMix64 stream, so the randomized cases are the
     /// same on every run and the crate needs no `rand` dependency.
@@ -817,7 +830,7 @@ mod tests {
     }
 
     fn agree(tag: &str, a: Fp256Mont, b: Fp256) {
-        assert_eq!(a.to_bytes(), b.to_bytes(), "{tag}");
+        assert_eq!(tb(a), tb(b), "{tag}");
     }
 
     // --- the constants -----------------------------------------------------
@@ -846,8 +859,8 @@ mod tests {
         assert_eq!(Fp256Mont::ONE.0, R_LIMBS);
         let mut expected = [0u8; 32];
         expected[0] = 1;
-        assert_eq!(Fp256Mont::ONE.to_bytes(), expected);
-        assert_eq!(Fp256Mont::ZERO.to_bytes(), [0u8; 32]);
+        assert_eq!(tb(Fp256Mont::ONE), expected);
+        assert_eq!(tb(Fp256Mont::ZERO), [0u8; 32]);
     }
 
     #[test]
@@ -872,7 +885,7 @@ mod tests {
         for b in sample_inputs(256) {
             agree("from_bytes", fast(&b), slow(&b));
             let x = fast(&b);
-            assert_eq!(Fp256Mont::from_bytes(&x.to_bytes()), x);
+            assert_eq!(Fp256Mont::from_bytes(&tb(x)), x);
             // Every representative is below p.
             let (_, borrow) = sub_limbs(x.0, P_LIMBS);
             assert_eq!(borrow, 1, "representative not canonical");
@@ -1187,8 +1200,8 @@ mod tests {
             while trial < 32 {
                 let b = rng.next_bytes(len);
                 assert_eq!(
-                    Fp256Mont::from_bytes(&b).to_bytes(),
-                    Fp256::from_bytes(&b).to_bytes(),
+                    tb(Fp256Mont::from_bytes(&b)),
+                    tb(Fp256::from_bytes(&b)),
                     "from_bytes at length {len}"
                 );
                 trial += 1;

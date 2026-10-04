@@ -1,5 +1,6 @@
 //! Reference instance of the prime-IR surface at the ML-DSA modulus
-//! `q = 8380417`: the field [`Fq`] ([`Field`], [`ModArith`] with `R = 2^32`) and
+//! `q = 8380417`: the field [`Fq`] ([`Field`], [`ModArith`] with `R = 2^32`,
+//! [`Rounding`]) and
 //! the ring [`PolyDsa`] = `Z_q[X]/(X^256 + 1)` ([`PolyRing`]) with the NTT of
 //! FIPS 204 §7.5.
 //!
@@ -11,6 +12,7 @@
 #![allow(clippy::needless_range_loop)]
 
 use crate::poly::{PolyRing, MODULUS_MLDSA};
+use crate::rounding::{reference, Rounding};
 use crate::{Field, ModArith};
 
 const Q: u64 = MODULUS_MLDSA as u64;
@@ -48,6 +50,8 @@ impl Fq {
 impl Field for Fq {
     const ZERO: Self = Fq(0);
     const ONE: Self = Fq(1);
+    const MODULUS_LE: &'static [u64] = &[Q];
+    const BYTES: usize = 3;
 
     fn add(self, rhs: Self) -> Self {
         Fq::new(self.0 as u64 + rhs.0 as u64)
@@ -97,10 +101,9 @@ impl Field for Fq {
         }
         Fq(acc as u32)
     }
-    fn to_bytes(self) -> [u8; 32] {
-        let mut out = [0u8; 32];
-        out[..4].copy_from_slice(&self.0.to_le_bytes());
-        out
+    /// Three bytes: `q < 2^23`.
+    fn write_bytes(self, out: &mut [u8]) {
+        out[..3].copy_from_slice(&self.0.to_le_bytes()[..3]);
     }
 }
 
@@ -117,6 +120,35 @@ impl ModArith for Fq {
     }
     fn mont_mul(self, rhs: Self) -> Self {
         self.mul(rhs).mul(Fq(MONT_R).inv())
+    }
+}
+
+/// The rounding operations of FIPS 203 and FIPS 204 at this modulus, by the
+/// integer reference computation.
+impl Rounding for Fq {
+    fn compress_d(self, d: u32) -> u32 {
+        reference::compress(Q, self.0 as u64, d)
+    }
+    fn decompress_d(y: u32, d: u32) -> Self {
+        Fq::new(reference::decompress(Q, y, d))
+    }
+    fn power2round(self, d: u32) -> (u32, i32) {
+        reference::power2round(self.0 as u64, d)
+    }
+    fn decompose(self, gamma2: u32) -> (u32, i32) {
+        reference::decompose(Q, self.0 as u64, gamma2)
+    }
+    fn high_bits(self, gamma2: u32) -> u32 {
+        self.decompose(gamma2).0
+    }
+    fn low_bits(self, gamma2: u32) -> i32 {
+        self.decompose(gamma2).1
+    }
+    fn make_hint(z: Self, r: Self, gamma2: u32) -> bool {
+        r.high_bits(gamma2) != r.add(z).high_bits(gamma2)
+    }
+    fn use_hint(h: bool, r: Self, gamma2: u32) -> u32 {
+        reference::use_hint(Q, h, r.0 as u64, gamma2)
     }
 }
 
@@ -226,6 +258,10 @@ impl PolyRing for PolyDsa {
         NttDsa(w)
     }
     /// FIPS 204 Algorithm 44 (AddNTT).
+    /// The accumulated product `acc + a∘b`, as `ntt_add` after `basemul`.
+    fn basemul_acc(acc: NttDsa, a: NttDsa, b: NttDsa) -> NttDsa {
+        Self::ntt_add(acc, Self::basemul(a, b))
+    }
     fn ntt_add(a: NttDsa, b: NttDsa) -> NttDsa {
         let mut w = [0u32; 256];
         for i in 0..256 {

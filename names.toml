@@ -1,0 +1,438 @@
+# The name manifest of primeir-hax: the compiler interface.
+#
+# One entry per trait item a compiler recognises by name: its qualified def
+# path (the path hax prints, `primeir_hax::<module>::<Trait>::<item>`), its
+# arity (the number of value arguments, `self` included; 0 for a constant)
+# and its op key (`<family>.<op>`). The families are those of the op keys of
+# the compiler's name table (`field`, `ring`, `tower`, `gf2`, `codec`) and
+# `modarith`, `ec`, `ct`, `sqrt` for the families that table does not yet
+# carry.
+#
+# `tests/names_manifest.rs` checks every entry against the trait declaration
+# in `src/` (the item exists in that trait, with that arity) and against
+# `hax_frontend_export.json` when that file is present:
+#
+# * an `[[extracted]]` entry must appear as a def path of the export;
+# * a `[[pending]]` entry must not: it was added to the source after the
+#   export was taken and appears once the crate is re-extracted. After a
+#   re-extraction the test fails on each such entry, which then moves to
+#   `[[extracted]]`.
+#
+# Def paths of the current export that are absent from the source (they
+# disappear at the next re-extraction):
+#   primeir_hax::Field::to_bytes          (replaced by Field::write_bytes)
+#   primeir_hax::field_modulus_limbs      (replaced by Field::MODULUS_LE)
+#   primeir_hax::field_modulus_p256_limbs (replaced by Field::MODULUS_LE)
+#   primeir_hax::fp256_mont::*            (only under `fieldmodel-witness`)
+#
+# The format is a subset of TOML: `[[extracted]]` or `[[pending]]` opens an
+# entry, followed by `path`, `arity` and `key` lines.
+
+# --- In the current export ------------------------------------------------
+
+[[extracted]]
+path = "primeir_hax::Field::ZERO"
+arity = 0
+key = "field.zero"
+
+[[extracted]]
+path = "primeir_hax::Field::ONE"
+arity = 0
+key = "field.one"
+
+[[extracted]]
+path = "primeir_hax::Field::add"
+arity = 2
+key = "field.add"
+
+[[extracted]]
+path = "primeir_hax::Field::sub"
+arity = 2
+key = "field.sub"
+
+[[extracted]]
+path = "primeir_hax::Field::mul"
+arity = 2
+key = "field.mul"
+
+[[extracted]]
+path = "primeir_hax::Field::neg"
+arity = 1
+key = "field.neg"
+
+[[extracted]]
+path = "primeir_hax::Field::square"
+arity = 1
+key = "field.square"
+
+[[extracted]]
+path = "primeir_hax::Field::double"
+arity = 1
+key = "field.double"
+
+[[extracted]]
+path = "primeir_hax::Field::inv"
+arity = 1
+key = "field.inv"
+
+[[extracted]]
+path = "primeir_hax::Field::pow"
+arity = 2
+key = "field.pow"
+
+[[extracted]]
+path = "primeir_hax::Field::from_bytes"
+arity = 1
+key = "codec.from_bytes"
+
+[[extracted]]
+path = "primeir_hax::ModArith::to_mont"
+arity = 1
+key = "modarith.to_mont"
+
+[[extracted]]
+path = "primeir_hax::ModArith::from_mont"
+arity = 1
+key = "modarith.from_mont"
+
+[[extracted]]
+path = "primeir_hax::ModArith::mont_mul"
+arity = 2
+key = "modarith.mont_mul"
+
+[[extracted]]
+path = "primeir_hax::EcGroup::IDENTITY"
+arity = 0
+key = "ec.identity"
+
+[[extracted]]
+path = "primeir_hax::EcGroup::point_add"
+arity = 2
+key = "ec.point_add"
+
+[[extracted]]
+path = "primeir_hax::EcGroup::point_double"
+arity = 1
+key = "ec.point_double"
+
+[[extracted]]
+path = "primeir_hax::EcGroup::scalar_mul"
+arity = 2
+key = "ec.scalar_mul"
+
+[[extracted]]
+path = "primeir_hax::EcGroup::to_affine"
+arity = 1
+key = "ec.to_affine"
+
+[[extracted]]
+path = "primeir_hax::ct::CtField::ct_select"
+arity = 3
+key = "ct.ct_select"
+
+[[extracted]]
+path = "primeir_hax::ct::CtField::ct_eq"
+arity = 2
+key = "ct.ct_eq"
+
+[[extracted]]
+path = "primeir_hax::ct::CtField::is_zero"
+arity = 1
+key = "ct.is_zero"
+
+[[extracted]]
+path = "primeir_hax::ct::CtField::is_negative"
+arity = 1
+key = "ct.is_negative"
+
+[[extracted]]
+path = "primeir_hax::ct::CtField::ct_abs"
+arity = 1
+key = "ct.ct_abs"
+
+[[extracted]]
+path = "primeir_hax::sqrt::SqrtRatio::Z"
+arity = 0
+key = "sqrt.z"
+
+[[extracted]]
+path = "primeir_hax::sqrt::SqrtRatio::sqrt_ratio"
+arity = 2
+key = "sqrt.sqrt_ratio"
+
+[[extracted]]
+path = "primeir_hax::poly::PolyRing::N"
+arity = 0
+key = "ring.N"
+
+[[extracted]]
+path = "primeir_hax::poly::PolyRing::ZERO"
+arity = 0
+key = "ring.ZERO"
+
+[[extracted]]
+path = "primeir_hax::poly::PolyRing::NTT_ZERO"
+arity = 0
+key = "ring.NTT_ZERO"
+
+[[extracted]]
+path = "primeir_hax::poly::PolyRing::coeff"
+arity = 2
+key = "ring.coeff"
+
+[[extracted]]
+path = "primeir_hax::poly::PolyRing::with_coeff"
+arity = 3
+key = "ring.with_coeff"
+
+[[extracted]]
+path = "primeir_hax::poly::PolyRing::ntt_coeff"
+arity = 2
+key = "ring.ntt_coeff"
+
+[[extracted]]
+path = "primeir_hax::poly::PolyRing::with_ntt_coeff"
+arity = 3
+key = "ring.with_ntt_coeff"
+
+[[extracted]]
+path = "primeir_hax::poly::PolyRing::ntt"
+arity = 1
+key = "ring.ntt"
+
+[[extracted]]
+path = "primeir_hax::poly::PolyRing::intt"
+arity = 1
+key = "ring.intt"
+
+[[extracted]]
+path = "primeir_hax::poly::PolyRing::basemul"
+arity = 2
+key = "ring.basemul"
+
+[[extracted]]
+path = "primeir_hax::poly::PolyRing::ntt_add"
+arity = 2
+key = "ring.ntt_add"
+
+[[extracted]]
+path = "primeir_hax::poly::PolyRing::ntt_sub"
+arity = 2
+key = "ring.ntt_sub"
+
+[[extracted]]
+path = "primeir_hax::poly::PolyRing::poly_add"
+arity = 2
+key = "ring.poly_add"
+
+[[extracted]]
+path = "primeir_hax::poly::PolyRing::poly_sub"
+arity = 2
+key = "ring.poly_sub"
+
+[[extracted]]
+path = "primeir_hax::poly::PolyRing::poly_smul"
+arity = 2
+key = "ring.poly_smul"
+
+[[extracted]]
+path = "primeir_hax::poly::PolyRing::ntt_mul"
+arity = 2
+key = "ring.ntt_mul"
+
+# --- After re-extraction ------------------------------------------------------
+
+[[pending]]
+path = "primeir_hax::Field::MODULUS_LE"
+arity = 0
+key = "field.modulus"
+
+[[pending]]
+path = "primeir_hax::Field::BYTES"
+arity = 0
+key = "codec.bytes"
+
+[[pending]]
+path = "primeir_hax::Field::write_bytes"
+arity = 2
+key = "codec.to_bytes"
+
+[[pending]]
+path = "primeir_hax::poly::PolyRing::basemul_acc"
+arity = 3
+key = "ring.basemul_acc"
+
+[[pending]]
+path = "primeir_hax::ext::ExtField::MODULUS_LE"
+arity = 0
+key = "tower.modulus"
+
+[[pending]]
+path = "primeir_hax::ext::ExtField::DEGREE"
+arity = 0
+key = "tower.degree"
+
+[[pending]]
+path = "primeir_hax::ext::ExtField::ZERO"
+arity = 0
+key = "tower.zero"
+
+[[pending]]
+path = "primeir_hax::ext::ExtField::ONE"
+arity = 0
+key = "tower.one"
+
+[[pending]]
+path = "primeir_hax::ext::ExtField::NONRESIDUE"
+arity = 0
+key = "tower.nonresidue"
+
+[[pending]]
+path = "primeir_hax::ext::ExtField::lift"
+arity = 1
+key = "tower.lift"
+
+[[pending]]
+path = "primeir_hax::ext::ExtField::add"
+arity = 2
+key = "tower.add"
+
+[[pending]]
+path = "primeir_hax::ext::ExtField::sub"
+arity = 2
+key = "tower.sub"
+
+[[pending]]
+path = "primeir_hax::ext::ExtField::neg"
+arity = 1
+key = "tower.neg"
+
+[[pending]]
+path = "primeir_hax::ext::ExtField::mul"
+arity = 2
+key = "tower.mul"
+
+[[pending]]
+path = "primeir_hax::ext::ExtField::square"
+arity = 1
+key = "tower.square"
+
+[[pending]]
+path = "primeir_hax::ext::ExtField::inv"
+arity = 1
+key = "tower.inv"
+
+[[pending]]
+path = "primeir_hax::ext::ExtField::conj"
+arity = 1
+key = "tower.conj"
+
+[[pending]]
+path = "primeir_hax::ext::ExtField::frobenius"
+arity = 2
+key = "tower.frobenius"
+
+[[pending]]
+path = "primeir_hax::ext::ExtField::mul_by_nonresidue"
+arity = 1
+key = "tower.mul_by_nonresidue"
+
+[[pending]]
+path = "primeir_hax::binary::BinaryField::BITS"
+arity = 0
+key = "gf2.bits"
+
+[[pending]]
+path = "primeir_hax::binary::BinaryField::BYTES"
+arity = 0
+key = "gf2.bytes"
+
+[[pending]]
+path = "primeir_hax::binary::BinaryField::MODULUS_LOW_LE"
+arity = 0
+key = "gf2.modulus_low_le"
+
+[[pending]]
+path = "primeir_hax::binary::BinaryField::ZERO"
+arity = 0
+key = "gf2.zero"
+
+[[pending]]
+path = "primeir_hax::binary::BinaryField::ONE"
+arity = 0
+key = "gf2.one"
+
+[[pending]]
+path = "primeir_hax::binary::BinaryField::from_poly_le"
+arity = 1
+key = "gf2.from_poly_le"
+
+[[pending]]
+path = "primeir_hax::binary::BinaryField::gf_add"
+arity = 2
+key = "gf2.gf_add"
+
+[[pending]]
+path = "primeir_hax::binary::BinaryField::gf_mul"
+arity = 2
+key = "gf2.gf_mul"
+
+[[pending]]
+path = "primeir_hax::binary::BinaryField::ghash_step"
+arity = 3
+key = "gf2.ghash_step"
+
+[[pending]]
+path = "primeir_hax::binary::BinaryField::polyval_step"
+arity = 3
+key = "gf2.polyval_step"
+
+[[pending]]
+path = "primeir_hax::binary::BinaryField::gf_from_bytes"
+arity = 1
+key = "gf2.gf_from_bytes"
+
+[[pending]]
+path = "primeir_hax::binary::BinaryField::gf_write_bytes"
+arity = 2
+key = "gf2.gf_write_bytes"
+
+[[pending]]
+path = "primeir_hax::rounding::Rounding::compress_d"
+arity = 2
+key = "codec.compress_d"
+
+[[pending]]
+path = "primeir_hax::rounding::Rounding::decompress_d"
+arity = 2
+key = "codec.decompress_d"
+
+[[pending]]
+path = "primeir_hax::rounding::Rounding::power2round"
+arity = 2
+key = "codec.power2round"
+
+[[pending]]
+path = "primeir_hax::rounding::Rounding::decompose"
+arity = 2
+key = "codec.decompose"
+
+[[pending]]
+path = "primeir_hax::rounding::Rounding::high_bits"
+arity = 2
+key = "codec.high_bits"
+
+[[pending]]
+path = "primeir_hax::rounding::Rounding::low_bits"
+arity = 2
+key = "codec.low_bits"
+
+[[pending]]
+path = "primeir_hax::rounding::Rounding::make_hint"
+arity = 3
+key = "codec.make_hint"
+
+[[pending]]
+path = "primeir_hax::rounding::Rounding::use_hint"
+arity = 3
+key = "codec.use_hint"

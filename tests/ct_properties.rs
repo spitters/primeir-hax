@@ -39,7 +39,12 @@ fn rfc9496_negative_field_elements() {
     for (i, s) in NEGATIVE_FIELD_ELEMENTS.iter().enumerate() {
         let bytes = hex32(s);
         let a = Fp25519::from_bytes(&bytes);
-        assert_eq!(a.to_bytes(), bytes, "element {} is canonical", i);
+        assert_eq!(
+            primeir_hax::to_byte_array::<Fp25519, 32>(a),
+            bytes,
+            "element {} is canonical",
+            i
+        );
         assert_eq!(a.is_negative(), 1, "element {} is negative", i);
         assert_eq!(a.neg().is_negative(), 0, "the negation of element {}", i);
         assert_eq!(a.ct_abs(), a.neg(), "absolute value of element {}", i);

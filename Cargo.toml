@@ -20,6 +20,12 @@ bigint-instances = ["dep:num-bigint"]
 # compare it against `fp256` and so need `bigint-instances` as well:
 # `cargo test --features fixed-width-instances`.
 fixed-width-instances = []
+# Puts `fp256_mont` on the hax extraction surface, for the export behind the
+# `FieldModel` witness:
+# `cargo hax -C --features fieldmodel-witness \; json`. Without it no
+# extraction carries the module, so the export the compiler reads has no
+# hand-written P-256 arithmetic. Under rustc it is `fixed-width-instances`.
+fieldmodel-witness = ["fixed-width-instances"]
 
 [dependencies]
 # The reference instance (opaque arithmetic leaf) is realized with num-bigint.

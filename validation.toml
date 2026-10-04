@@ -12,3 +12,11 @@ reference = "RFC 9496 Appendix A: the eight negative field elements of A.2 throu
 reference_kind = "standards-body-vectors"
 test_files = ["tests/ct_properties.rs"]
 provenance = "https://www.rfc-editor.org/rfc/rfc9496.txt; the eight strings are the entries under Negative field elements in Appendix A.2"
+
+# Standards-body vectors for the binary-field op family (src/binary.rs).
+[[standards_vectors]]
+module = "gf128"
+reference = "GHASH: test case 2 of the GCM specification (McGrew and Viega, The Galois/Counter Mode of Operation, Appendix B), GHASH(H, {}, C) = f38cbb1ad69223dcc3457ae5b6b0f885. POLYVAL: RFC 8452 Appendix A, POLYVAL(H, X_1, X_2) = f7a3b47b846119fae5b7866cf5e5b77e"
+reference_kind = "standards-body-vectors"
+test_files = ["tests/binary_field_laws.rs"]
+provenance = "https://csrc.nist.gov/groups/ST/toolkit/BCM/documents/proposedmodes/gcm/gcm-spec.pdf (test case 2); https://www.rfc-editor.org/rfc/rfc8452.txt (Appendix A, POLYVAL example)"

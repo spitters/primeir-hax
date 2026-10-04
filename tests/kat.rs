@@ -22,7 +22,7 @@ fn p() -> BigUint {
 }
 
 fn to_big(a: Fp25519) -> BigUint {
-    BigUint::from_bytes_le(&a.to_bytes())
+    BigUint::from_bytes_le(&primeir_hax::to_byte_array::<Fp25519, 32>(a))
 }
 
 fn from_big(x: BigUint) -> Fp25519 {

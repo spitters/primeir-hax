@@ -22,7 +22,8 @@
 
 use crate::laws;
 use crate::poly::{
-    mlwe_entry_demo, ntt_dot2_demo, ntt_residual_demo, ntt_sample_demo, poly_mul_demo, PolyRing,
+    mlwe_entry_demo, ntt_dot2_acc_demo, ntt_dot2_demo, ntt_residual_demo, ntt_sample_demo,
+    poly_mul_demo, PolyRing,
 };
 use crate::Field;
 
@@ -266,6 +267,21 @@ pub fn check_basemul<R: PolyRing>(rng: &mut Lcg, label: &str) {
     );
 }
 
+/// Law 9: `basemul_acc` is the accumulated product.
+pub fn check_basemul_acc<R: PolyRing>(rng: &mut Lcg, label: &str) {
+    let acc = rng.ntt_form::<R>();
+    let w = rng.ntt_form::<R>();
+    let v = rng.ntt_form::<R>();
+    assert!(
+        laws::basemul_acc_law::<R>(acc, w, v),
+        "{label}: basemul_acc is not ntt_add after basemul"
+    );
+    assert!(
+        laws::basemul_acc_law::<R>(R::NTT_ZERO, w, v),
+        "{label}: basemul_acc from NTT_ZERO is not basemul"
+    );
+}
+
 /// Law 2: `ntt_mul` is the negacyclic product of `Z_q[X]/(X^n + 1)`, checked
 /// against the schoolbook convolution and against `X^(n−1)·X = −1`.
 pub fn check_ntt_mul_is_negacyclic<R: PolyRing>(rng: &mut Lcg, label: &str) {
@@ -333,6 +349,10 @@ pub fn check_generic_callers<R: PolyRing>(rng: &mut Lcg, label: &str) {
         R::intt(dot) == schoolbook_negacyclic(a, s).poly_add(schoolbook_negacyclic(b, v)),
         "{label}: ntt_dot2_demo is not a0·v0 + a1·v1"
     );
+    assert!(
+        ntt_dot2_acc_demo::<R>(a.ntt(), b.ntt(), s.ntt(), v.ntt()) == dot,
+        "{label}: ntt_dot2_acc_demo is not ntt_dot2_demo"
+    );
     let residual = ntt_residual_demo::<R>(a.ntt(), s.ntt(), b.ntt(), v.ntt());
     assert!(
         R::intt(residual) == schoolbook_negacyclic(a, s).poly_sub(schoolbook_negacyclic(b, v)),
@@ -352,6 +372,7 @@ pub fn check_poly_ring<R: PolyRing>(label: &str, seed: u64, rounds: usize) {
         check_ntt_add::<R>(&mut rng, label);
         check_ntt_sub::<R>(&mut rng, label);
         check_basemul::<R>(&mut rng, label);
+        check_basemul_acc::<R>(&mut rng, label);
         check_ntt_mul_is_negacyclic::<R>(&mut rng, label);
         check_ring_axioms::<R>(&mut rng, label);
         check_generic_callers::<R>(&mut rng, label);

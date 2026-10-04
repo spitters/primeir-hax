@@ -74,6 +74,8 @@ impl Field for Fp25519 {
         b[0] = 1;
         b
     });
+    const MODULUS_LE: &'static [u64] = &crate::FIELD_MODULUS_25519;
+    const BYTES: usize = 32;
 
     fn add(self, rhs: Self) -> Self {
         Fp25519::from_big(self.to_big() + rhs.to_big())
@@ -114,8 +116,8 @@ impl Field for Fp25519 {
     fn from_bytes(bytes: &[u8]) -> Self {
         Fp25519::from_big(BigUint::from_bytes_le(bytes))
     }
-    fn to_bytes(self) -> [u8; 32] {
-        self.0
+    fn write_bytes(self, out: &mut [u8]) {
+        out[..32].copy_from_slice(&self.0);
     }
 }
 

@@ -13,6 +13,7 @@
 //! | `ntt`             | `ntt`      | `polyC → polyN`              | coefficient form to NTT form           |
 //! | `intt`            | `intt`     | `polyN → polyC`              | NTT form to coefficient form           |
 //! | `basemul`         | `basemul`  | `polyN → polyN → polyN`      | product of two elements in NTT form    |
+//! | `basemul_acc`     | —          | `polyN → polyN → polyN → polyN` | accumulated product `acc + a∘b`     |
 //! | `poly_add`        | `polyAdd`  | `polyC → polyC → polyC`      | sum                                    |
 //! | `poly_sub`        | `polySub`  | `polyC → polyC → polyC`      | difference                             |
 //! | `poly_smul`       | `polySMul` | `polyC → polyC`              | product with a scalar                  |
@@ -27,6 +28,11 @@
 //! residual `â ∘ ẑ − ĉ ∘ t̂` of ML-DSA verification (Algorithm 8 line 11) needs.
 //! `PolyOp` has no operation for either, and by linearity of the transform they
 //! equal `ntt (poly_add (intt a) (intt b))` and `ntt (poly_sub (intt a) (intt b))`.
+//!
+//! `basemul_acc` is the accumulated product `acc + a∘b` in NTT form, the step
+//! of a matrix-vector product whose accumulator a lazy realisation keeps
+//! unreduced (the PW-ACC and ROW-LAZY templates); it equals
+//! `ntt_add(acc, basemul(a, b))`.
 //!
 //! `NTT_ZERO` and `with_ntt_coeff` build an element of `polyN` directly, which a
 //! scheme that samples in NTT form (ML-DSA's `ExpandA`, ML-KEM's `Â`) needs and
@@ -107,6 +113,8 @@ use crate::Field;
 ///    `NTT_ZERO` with the entries of `w` yields `w`. Reachability is what makes
 ///    the second half of law 1 a statement about an arbitrary element of
 ///    `polyN`, not only about one in the image of `ntt`.
+/// 9. **`basemul_acc` is the accumulated product**:
+///    `Self::basemul_acc(acc, w, v) == Self::ntt_add(acc, Self::basemul(w, v))`.
 ///
 /// `crate::poly_laws` checks every one of these on pseudorandom inputs, for any
 /// implementor.
@@ -161,6 +169,9 @@ pub trait PolyRing: Copy + Clone + PartialEq {
     fn intt(w: Self::NttForm) -> Self;
     /// `PolyOp.basemul`: the product of two elements in NTT form.
     fn basemul(a: Self::NttForm, b: Self::NttForm) -> Self::NttForm;
+    /// The accumulated product `acc + a∘b` of elements in NTT form
+    /// (law 9): one step of a matrix-vector product in NTT form.
+    fn basemul_acc(acc: Self::NttForm, a: Self::NttForm, b: Self::NttForm) -> Self::NttForm;
     /// The sum of two elements in NTT form (FIPS 204 Algorithm 44).
     fn ntt_add(a: Self::NttForm, b: Self::NttForm) -> Self::NttForm;
     /// The difference of two elements in NTT form.
@@ -198,6 +209,18 @@ pub fn ntt_dot2_demo<R: PolyRing>(
     v1: R::NttForm,
 ) -> R::NttForm {
     R::ntt_add(R::basemul(a0, v0), R::basemul(a1, v1))
+}
+
+/// A generic caller of [`PolyRing::basemul_acc`]: the inner product of two
+/// vectors of length two in NTT form, accumulated, as [`ntt_dot2_demo`]
+/// computes it with `basemul` and `ntt_add`.
+pub fn ntt_dot2_acc_demo<R: PolyRing>(
+    a0: R::NttForm,
+    a1: R::NttForm,
+    v0: R::NttForm,
+    v1: R::NttForm,
+) -> R::NttForm {
+    R::basemul_acc(R::basemul(a0, v0), a1, v1)
 }
 
 /// A generic caller of [`PolyRing::ntt_sub`]: one entry of the residual

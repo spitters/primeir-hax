@@ -60,6 +60,9 @@ impl<const FAULT: u8> PolyRing for Mutant<FAULT> {
             PolyKem::basemul(a, b)
         }
     }
+    fn basemul_acc(acc: NttKem, a: NttKem, b: NttKem) -> NttKem {
+        Self::ntt_add(acc, Self::basemul(a, b))
+    }
     fn ntt_add(a: NttKem, b: NttKem) -> NttKem {
         PolyKem::ntt_add(a, b)
     }

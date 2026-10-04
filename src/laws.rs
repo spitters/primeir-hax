@@ -1,8 +1,9 @@
 //! The algebraic laws of the prime-IR traits, one Boolean function per law.
 //!
 //! Each function states one law of [`Field`], [`ModArith`], [`EcGroup`],
-//! [`CtField`], [`SqrtRatio`] or [`PolyRing`] at the arguments it is given and
-//! returns whether the law holds there. The same function serves two readers:
+//! [`CtField`], [`SqrtRatio`], [`PolyRing`], [`ExtField`], [`BinaryField`] or
+//! [`Rounding`] at the arguments it is given and returns whether the law holds
+//! there. The same function serves two readers:
 //!
 //! * under rustc, the test suites ([`crate::poly_laws`], `tests/kat.rs`,
 //!   `tests/ct_properties.rs` and the tests of the instances) assert it on
@@ -19,8 +20,11 @@
 //! inverse for a nonzero element, `sqrt_ratio` for a nonzero denominator)
 //! holds vacuously at the others.
 
+use crate::binary::BinaryField;
 use crate::ct::CtField;
+use crate::ext::ExtField;
 use crate::poly::PolyRing;
+use crate::rounding::Rounding;
 use crate::sqrt::SqrtRatio;
 use crate::{EcGroup, Field, ModArith};
 
@@ -90,6 +94,105 @@ pub fn square_law<F: Field>(a: F) -> bool {
 /// `double` is `a ↦ a + a` ([`Field::double`]).
 pub fn double_law<F: Field>(a: F) -> bool {
     a.double() == a.add(a)
+}
+
+// --- Field: the modulus and the byte codec ----------------------------------
+
+/// The largest [`Field::BYTES`] the codec laws handle (1024-bit fields); above
+/// it they hold vacuously.
+pub const LAW_BYTES_MAX: usize = 128;
+
+/// The number of bits of the integer with little-endian limbs `limbs`.
+pub fn bit_length(limbs: &[u64]) -> usize {
+    let mut bits = 0;
+    for i in 0..limbs.len() {
+        for b in 0..64 {
+            if (limbs[i] >> b) & 1 == 1 {
+                bits = 64 * i + b + 1;
+            }
+        }
+    }
+    bits
+}
+
+/// Limb `i` of the little-endian integer formed by the first `n` bytes of
+/// `buf`.
+fn limb_le(buf: &[u8], i: usize, n: usize) -> u64 {
+    let mut v: u64 = 0;
+    let mut j = 8;
+    while j > 0 {
+        j -= 1;
+        let k = 8 * i + j;
+        let byte = if k < n { buf[k] } else { 0 };
+        v = (v << 8) | (byte as u64);
+    }
+    v
+}
+
+/// [`Field::BYTES`] is the byte length of the modulus,
+/// `8·BYTES ≥ bitlen(p) > 8·(BYTES − 1)`, and the last limb of
+/// [`Field::MODULUS_LE`] is nonzero.
+pub fn bytes_width_law<F: Field>() -> bool {
+    let p = F::MODULUS_LE;
+    let bits = bit_length(p);
+    p.len() > 0 && p[p.len() - 1] != 0 && 8 * F::BYTES >= bits && 8 * F::BYTES < bits + 8
+}
+
+/// [`Field::MODULUS_LE`] is the modulus of the arithmetic: the encoding of
+/// `ZERO − ONE` is `p − 1`.
+pub fn modulus_law<F: Field>() -> bool {
+    let p = F::MODULUS_LE;
+    if p.len() == 0 {
+        false
+    } else if F::BYTES > LAW_BYTES_MAX {
+        true
+    } else {
+        let mut buf = [0u8; LAW_BYTES_MAX];
+        F::ZERO.sub(F::ONE).write_bytes(&mut buf);
+        let mut carry: u128 = 1;
+        let mut ok = true;
+        for i in 0..p.len() {
+            let s = (limb_le(&buf, i, F::BYTES) as u128) + carry;
+            ok = ok && (s as u64) == p[i];
+            carry = s >> 64;
+        }
+        ok && carry == 0
+    }
+}
+
+/// `from_bytes` inverts `write_bytes` ([`Field::write_bytes`]).
+pub fn bytes_roundtrip_law<F: Field>(a: F) -> bool {
+    if F::BYTES > LAW_BYTES_MAX {
+        true
+    } else {
+        let mut buf = [0u8; LAW_BYTES_MAX];
+        a.write_bytes(&mut buf);
+        F::from_bytes(&buf) == a
+    }
+}
+
+/// `write_bytes` writes the canonical representative: the integer it encodes
+/// is below `p`.
+pub fn bytes_canonical_law<F: Field>(a: F) -> bool {
+    let p = F::MODULUS_LE;
+    if F::BYTES > LAW_BYTES_MAX {
+        true
+    } else {
+        let mut buf = [0u8; LAW_BYTES_MAX];
+        a.write_bytes(&mut buf);
+        let mut decided = false;
+        let mut below = false;
+        let mut i = p.len();
+        while i > 0 {
+            i -= 1;
+            let x = limb_le(&buf, i, F::BYTES);
+            if !decided && x != p[i] {
+                decided = true;
+                below = x < p[i];
+            }
+        }
+        below
+    }
 }
 
 // --- ModArith ---------------------------------------------------------------
@@ -288,6 +391,12 @@ pub fn basemul_zero_law<R: PolyRing>(w: R::NttForm) -> bool {
     R::basemul(w, R::ZERO.ntt()) == R::ZERO.ntt()
 }
 
+/// Law 9: `basemul_acc` is the accumulated product,
+/// `basemul_acc(acc, w, v) = ntt_add(acc, basemul(w, v))`.
+pub fn basemul_acc_law<R: PolyRing>(acc: R::NttForm, w: R::NttForm, v: R::NttForm) -> bool {
+    R::basemul_acc(acc, w, v) == R::ntt_add(acc, R::basemul(w, v))
+}
+
 /// Law 4: `ntt_add` is the sum transported along the transform,
 /// `ntt_add(ntt a, ntt b) = ntt(a + b)`.
 pub fn ntt_add_law<R: PolyRing>(a: R, b: R) -> bool {
@@ -465,4 +574,275 @@ pub fn ntt_ext_law<R: PolyRing>(w: R::NttForm) -> bool {
         rebuilt = R::with_ntt_coeff(rebuilt, j, R::ntt_coeff(w, j));
     }
     rebuilt == w
+}
+
+// --- ExtField ---------------------------------------------------------------
+
+/// `a^e` by square-and-multiply, `e` given as little-endian `u64` limbs.
+pub fn ext_pow<E: ExtField>(a: E, exp: &[u64]) -> E {
+    let mut acc = E::ONE;
+    let mut j = exp.len();
+    while j > 0 {
+        j -= 1;
+        let limb = exp[j];
+        let mut bit = 64;
+        while bit > 0 {
+            bit -= 1;
+            acc = acc.square();
+            if (limb >> bit) & 1 == 1 {
+                acc = acc.mul(a);
+            }
+        }
+    }
+    acc
+}
+
+/// `neg` is the additive inverse: `a + (−a) = 0`.
+pub fn ext_add_neg_law<E: ExtField>(a: E) -> bool {
+    a.add(a.neg()) == E::ZERO && a.sub(a) == E::ZERO && a.add(E::ZERO) == a
+}
+
+/// Commutativity of multiplication.
+pub fn ext_mul_comm_law<E: ExtField>(a: E, b: E) -> bool {
+    a.mul(b) == b.mul(a)
+}
+
+/// Associativity of multiplication.
+pub fn ext_mul_assoc_law<E: ExtField>(a: E, b: E, c: E) -> bool {
+    a.mul(b).mul(c) == a.mul(b.mul(c))
+}
+
+/// Distributivity of multiplication over addition.
+pub fn ext_distrib_law<E: ExtField>(a: E, b: E, c: E) -> bool {
+    a.mul(b.add(c)) == a.mul(b).add(a.mul(c))
+}
+
+/// `ONE` is the unit of multiplication.
+pub fn ext_mul_one_law<E: ExtField>(a: E) -> bool {
+    a.mul(E::ONE) == a
+}
+
+/// `square` is `a ↦ a·a`.
+pub fn ext_square_law<E: ExtField>(a: E) -> bool {
+    a.square() == a.mul(a)
+}
+
+/// `inv` is the inverse of a nonzero element; the law holds at `ZERO`.
+pub fn ext_mul_inv_law<E: ExtField>(a: E) -> bool {
+    if a == E::ZERO {
+        true
+    } else {
+        a.mul(a.inv()) == E::ONE
+    }
+}
+
+/// `mul_by_nonresidue` is the product with `NONRESIDUE`.
+pub fn ext_mul_by_nonresidue_law<E: ExtField>(a: E) -> bool {
+    a.mul_by_nonresidue() == a.mul(E::NONRESIDUE)
+}
+
+/// `conj` is `frobenius(DEGREE / 2)`, and an involution.
+pub fn ext_conj_law<E: ExtField>(a: E) -> bool {
+    a.conj() == a.frobenius(E::DEGREE / 2) && a.conj().conj() == a
+}
+
+/// `frobenius(·, 1)` is the `p`-th power, `p` the characteristic.
+pub fn ext_frobenius_pow_law<E: ExtField>(a: E) -> bool {
+    a.frobenius(1) == ext_pow(a, E::MODULUS_LE)
+}
+
+/// `frobenius(·, DEGREE)` is the identity.
+pub fn ext_frobenius_period_law<E: ExtField>(a: E) -> bool {
+    a.frobenius(E::DEGREE) == a
+}
+
+/// `frobenius(·, k)` is a ring homomorphism.
+pub fn ext_frobenius_hom_law<E: ExtField>(a: E, b: E, k: usize) -> bool {
+    a.mul(b).frobenius(k) == a.frobenius(k).mul(b.frobenius(k))
+        && a.add(b).frobenius(k) == a.frobenius(k).add(b.frobenius(k))
+}
+
+/// `frobenius(frobenius(a, i), j) = frobenius(a, i + j)`.
+pub fn ext_frobenius_compose_law<E: ExtField>(a: E, i: usize, j: usize) -> bool {
+    a.frobenius(i).frobenius(j) == a.frobenius(i + j)
+}
+
+// --- BinaryField ------------------------------------------------------------
+
+/// `x^BITS`, computed by repeated multiplication by `x`.
+pub fn x_pow_bits<B: BinaryField>() -> B {
+    let x = B::from_poly_le(&[2]);
+    let mut acc = B::ONE;
+    for _ in 0..B::BITS {
+        acc = acc.gf_mul(x);
+    }
+    acc
+}
+
+/// The modulus is `x^BITS + r` with `r` given by `MODULUS_LOW_LE`, and
+/// `from_poly_le(1) = ONE`.
+pub fn binary_modulus_law<B: BinaryField>() -> bool {
+    x_pow_bits::<B>() == B::from_poly_le(B::MODULUS_LOW_LE) && B::from_poly_le(&[1]) == B::ONE
+}
+
+/// `gf_add` is commutative, has `ZERO` as unit, and every element is its own
+/// negative.
+pub fn gf_add_law<B: BinaryField>(a: B, b: B) -> bool {
+    a.gf_add(b) == b.gf_add(a) && a.gf_add(B::ZERO) == a && a.gf_add(a) == B::ZERO
+}
+
+/// `gf_mul` is commutative and associative, distributes over `gf_add`, and
+/// has `ONE` as unit.
+pub fn gf_mul_law<B: BinaryField>(a: B, b: B, c: B) -> bool {
+    a.gf_mul(b) == b.gf_mul(a)
+        && a.gf_mul(b).gf_mul(c) == a.gf_mul(b.gf_mul(c))
+        && a.gf_mul(b.gf_add(c)) == a.gf_mul(b).gf_add(a.gf_mul(c))
+        && a.gf_mul(B::ONE) == a
+}
+
+/// `ghash_step(acc, x, h) = (acc + x)·h`.
+pub fn ghash_step_law<B: BinaryField>(acc: B, x: B, h: B) -> bool {
+    acc.ghash_step(x, h) == acc.gf_add(x).gf_mul(h)
+}
+
+/// `polyval_step(acc, x, h)·x^BITS = (acc + x)·h`.
+pub fn polyval_step_law<B: BinaryField>(acc: B, x: B, h: B) -> bool {
+    acc.polyval_step(x, h).gf_mul(x_pow_bits::<B>()) == acc.gf_add(x).gf_mul(h)
+}
+
+/// `gf_from_bytes` inverts `gf_write_bytes` (blocks of at most 64 bytes;
+/// vacuous above).
+pub fn gf_bytes_roundtrip_law<B: BinaryField>(a: B) -> bool {
+    if B::BYTES > 64 {
+        true
+    } else {
+        let mut buf = [0u8; 64];
+        a.gf_write_bytes(&mut buf);
+        B::gf_from_bytes(&buf) == a
+    }
+}
+
+// --- Rounding ---------------------------------------------------------------
+//
+// The laws read `q` as `MODULUS_LE[0]` and an element through its canonical
+// encoding; a precondition that fails makes the law hold vacuously.
+
+/// The canonical representative of `a`, for `BYTES ≤ 8` (zero otherwise).
+pub fn canon_u64<F: Field>(a: F) -> u64 {
+    let mut buf = [0u8; 8];
+    if F::BYTES <= 8 {
+        a.write_bytes(&mut buf);
+    }
+    limb_le(&buf, 0, 8)
+}
+
+/// The modulus `q` of a single-limb field.
+fn modulus_q<F: Field>() -> u64 {
+    F::MODULUS_LE[0]
+}
+
+/// `1 ≤ d` and `2^d < q`.
+fn compress_width_ok<F: Field>(d: u32) -> bool {
+    d >= 1 && d < 32 && (1u64 << d) < modulus_q::<F>()
+}
+
+/// `|x mod± q|` for `x ∈ [0, q)`.
+fn centred_abs(x: u64, q: u64) -> u64 {
+    if x > q - x {
+        q - x
+    } else {
+        x
+    }
+}
+
+/// `compress_d` lands in `[0, 2^d)`.
+pub fn compress_range_law<F: Rounding>(a: F, d: u32) -> bool {
+    if compress_width_ok::<F>(d) {
+        (a.compress_d(d) as u64) < (1u64 << d)
+    } else {
+        true
+    }
+}
+
+/// `compress_d(decompress_d(y, d), d) = y` for `y < 2^d` (FIPS 203, Section
+/// 4.2.1).
+pub fn compress_decompress_law<F: Rounding>(y: u32, d: u32) -> bool {
+    if compress_width_ok::<F>(d) && (y as u64) < (1u64 << d) {
+        F::decompress_d(y, d).compress_d(d) == y
+    } else {
+        true
+    }
+}
+
+/// `|decompress_d(compress_d(r, d), d) − r mod± q| ≤ ⌈q / 2^(d+1)⌋` (FIPS
+/// 203, Section 4.2.1).
+pub fn decompress_compress_law<F: Rounding>(a: F, d: u32) -> bool {
+    if compress_width_ok::<F>(d) {
+        let q = modulus_q::<F>();
+        let x = canon_u64(a);
+        let y = canon_u64(F::decompress_d(a.compress_d(d), d));
+        let dist = centred_abs((y + q - x) % q, q);
+        dist <= (q + (1u64 << d)) >> (d + 1)
+    } else {
+        true
+    }
+}
+
+/// `power2round(r, d) = (r1, r0)` with `r1·2^d + r0 ≡ r (mod q)` and
+/// `−2^(d−1) < r0 ≤ 2^(d−1)` (FIPS 204, Algorithm 35).
+pub fn power2round_law<F: Rounding>(a: F, d: u32) -> bool {
+    if d >= 1 && d <= 30 {
+        let q = modulus_q::<F>() as i64;
+        let (r1, r0) = a.power2round(d);
+        let half = 1i64 << (d - 1);
+        let v = (r1 as i64) * (1i64 << d) + (r0 as i64);
+        (r0 as i64) > -half && (r0 as i64) <= half && ((v % q) + q) % q == canon_u64(a) as i64
+    } else {
+        true
+    }
+}
+
+/// `γ2 > 0` divides `(q − 1)/2`.
+fn gamma2_ok<F: Field>(gamma2: u32) -> bool {
+    let q = modulus_q::<F>();
+    gamma2 > 0 && (q - 1) % (2 * gamma2 as u64) == 0
+}
+
+/// `decompose(r, γ2) = (r1, r0)` with `r1·2γ2 + r0 ≡ r (mod q)`,
+/// `−γ2 ≤ r0 ≤ γ2` and `0 ≤ r1 < (q − 1)/2γ2` (FIPS 204, Algorithm 36).
+pub fn decompose_law<F: Rounding>(a: F, gamma2: u32) -> bool {
+    if gamma2_ok::<F>(gamma2) {
+        let q = modulus_q::<F>() as i64;
+        let g = gamma2 as i64;
+        let (r1, r0) = a.decompose(gamma2);
+        let v = (r1 as i64) * 2 * g + (r0 as i64);
+        (r0 as i64) >= -g
+            && (r0 as i64) <= g
+            && (r1 as i64) < (q - 1) / (2 * g)
+            && ((v % q) + q) % q == canon_u64(a) as i64
+    } else {
+        true
+    }
+}
+
+/// `high_bits` and `low_bits` are the components of `decompose` (FIPS 204,
+/// Algorithms 37 and 38).
+pub fn high_low_bits_law<F: Rounding>(a: F, gamma2: u32) -> bool {
+    if gamma2_ok::<F>(gamma2) {
+        let (r1, r0) = a.decompose(gamma2);
+        a.high_bits(gamma2) == r1 && a.low_bits(gamma2) == r0
+    } else {
+        true
+    }
+}
+
+/// For `|z mod± q| ≤ γ2`, `use_hint(make_hint(z, r), r) = high_bits(r + z)`
+/// (Lemma 1 of the CRYSTALS-Dilithium specification, `α = 2γ2`).
+pub fn hint_law<F: Rounding>(z: F, r: F, gamma2: u32) -> bool {
+    let q = modulus_q::<F>();
+    if gamma2_ok::<F>(gamma2) && centred_abs(canon_u64(z), q) <= gamma2 as u64 {
+        F::use_hint(F::make_hint(z, r, gamma2), r, gamma2) == r.add(z).high_bits(gamma2)
+    } else {
+        true
+    }
 }

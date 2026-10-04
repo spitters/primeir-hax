@@ -1,5 +1,5 @@
 //! Reference instance of the prime-IR lattice surface at the ML-KEM modulus
-//! `q = 3329`: the field [`Fq`] ([`Field`]) and the ring [`PolyKem`] =
+//! `q = 3329`: the field [`Fq`] ([`Field`], [`Rounding`]) and the ring [`PolyKem`] =
 //! `Z_q[X]/(X^256 + 1)` ([`PolyRing`]) with the NTT of FIPS 203 §4.3.
 //!
 //! The transform is **incomplete**: it runs 7 layers, not 8, so it splits
@@ -24,6 +24,7 @@
 #![allow(clippy::needless_range_loop)]
 
 use crate::poly::{PolyRing, MODULUS_MLKEM};
+use crate::rounding::{reference, Rounding};
 use crate::Field;
 
 const Q: u32 = MODULUS_MLKEM;
@@ -66,6 +67,8 @@ impl Fq {
 impl Field for Fq {
     const ZERO: Self = Fq(0);
     const ONE: Self = Fq(1);
+    const MODULUS_LE: &'static [u64] = &[Q as u64];
+    const BYTES: usize = 2;
 
     fn add(self, rhs: Self) -> Self {
         Fq::new(self.0 as u32 + rhs.0 as u32)
@@ -115,10 +118,38 @@ impl Field for Fq {
         }
         Fq(acc as u16)
     }
-    fn to_bytes(self) -> [u8; 32] {
-        let mut out = [0u8; 32];
+    /// Two bytes: `q < 2^12`.
+    fn write_bytes(self, out: &mut [u8]) {
         out[..2].copy_from_slice(&self.0.to_le_bytes());
-        out
+    }
+}
+
+/// The rounding operations of FIPS 203 and FIPS 204 at this modulus, by the
+/// integer reference computation.
+impl Rounding for Fq {
+    fn compress_d(self, d: u32) -> u32 {
+        reference::compress(Q as u64, self.0 as u64, d)
+    }
+    fn decompress_d(y: u32, d: u32) -> Self {
+        Fq::new(reference::decompress(Q as u64, y, d) as u32)
+    }
+    fn power2round(self, d: u32) -> (u32, i32) {
+        reference::power2round(self.0 as u64, d)
+    }
+    fn decompose(self, gamma2: u32) -> (u32, i32) {
+        reference::decompose(Q as u64, self.0 as u64, gamma2)
+    }
+    fn high_bits(self, gamma2: u32) -> u32 {
+        self.decompose(gamma2).0
+    }
+    fn low_bits(self, gamma2: u32) -> i32 {
+        self.decompose(gamma2).1
+    }
+    fn make_hint(z: Self, r: Self, gamma2: u32) -> bool {
+        r.high_bits(gamma2) != r.add(z).high_bits(gamma2)
+    }
+    fn use_hint(h: bool, r: Self, gamma2: u32) -> u32 {
+        reference::use_hint(Q as u64, h, r.0 as u64, gamma2)
     }
 }
 
@@ -264,6 +295,10 @@ impl PolyRing for PolyKem {
             w[i][1] = a0.mul(b1).add(a1.mul(b0)).0;
         }
         NttKem(w)
+    }
+    /// The accumulated product `acc + a∘b`, as `ntt_add` after `basemul`.
+    fn basemul_acc(acc: NttKem, a: NttKem, b: NttKem) -> NttKem {
+        Self::ntt_add(acc, Self::basemul(a, b))
     }
     fn ntt_add(a: NttKem, b: NttKem) -> NttKem {
         let mut w = [[0u16; 2]; BLOCKS];
